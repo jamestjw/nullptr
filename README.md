@@ -1,19 +1,13 @@
 # Use your Android phone as a Fedora trackpad
 
-1. Connect the phone and computer to the same Tailscale network.
-2. Install `android/build/outputs/apk/debug/android-debug.apk` on the phone. With USB debugging, you can use `adb install -r android/build/outputs/apk/debug/android-debug.apk` instead.
-3. Run the companion from a terminal in your X11 desktop session:
+1. Connect your phone and computer to the same Tailscale network.
+2. Install the Android APK from [GitHub Releases](https://github.com/jamestjw/nullptr/releases/latest). If you built the debug APK instead, install it over USB with `adb install -r android/build/outputs/apk/debug/android-debug.apk`.
+3. Download and extract the Linux companion archive, then run `./nullptr-companion` from your X11 desktop session. If you built the companion yourself, run `./companion/build/nullptr-companion`.
+4. Open **nullptr trackpad** and tap **Scan pairing QR**. You can also enter the address and pairing code shown in the terminal.
 
-   ```sh
-   ./companion/build/nullptr-companion
-   ```
+Keep the companion running while you use the trackpad. Tap to click. Hold and slide to drag. Slide two fingers to scroll, or tap with two fingers to right-click. Open **Settings** to adjust pointer sensitivity or reverse scrolling.
 
-4. Open **nullptr trackpad** on the phone. Tap **Scan pairing QR**, or enter the Tailscale address and pairing code printed by the companion.
-5. Keep the companion running while you use the trackpad. Tap to click, or hold then slide to drag. Slide two fingers to scroll, or tap with two fingers to right-click.
-
-Open **Settings** on the trackpad screen to adjust pointer sensitivity or invert two-finger scrolling.
-
-The companion listens on its Tailscale IPv4 address on TCP port `47822` and relies on Tailscale to encrypt traffic. If the phone cannot connect, check that your tailnet policy allows the phone to reach that port. Pair again by restarting the companion with `--pair`.
+The companion listens on TCP port `47822` at its Tailscale IPv4 address. Tailscale encrypts the connection. If the phone cannot connect, check that your tailnet policy and Fedora firewall allow the phone to reach that port. To show a new pairing code for a companion you start by hand, restart it with `--pair`.
 
 ## Build both apps
 
@@ -30,39 +24,39 @@ mkdir -p companion/build
 (cd companion && go build -o build/nullptr-companion .)
 ```
 
-The companion currently supports Linux desktops running X11. A future macOS companion can reuse the Android app and its pairing and input protocol.
+The companion supports Linux desktops running X11. A macOS companion could use the same Android app and protocol.
 
 ## Start the companion at login
 
-On Fedora x86-64, make sure Tailscale, `curl`, and `jq` are installed. Run the installer from your X11 desktop session as your regular user:
+On Fedora x86-64, install Tailscale, `curl`, and `jq`. Run the installer from your X11 desktop session without `sudo`:
 
 ```sh
-bash install-companion.sh
+./install-companion.sh
 ```
 
-The installer verifies the latest stable companion archive against the GitHub release checksum. It installs the binary in `~/.local/bin` and registers a systemd user service. It starts the service now if your phone is already paired and the port is free. An XDG autostart entry starts it on subsequent desktop logins. Fedora's default i3 setup runs these entries through `dex-autostart`.
+The installer downloads the latest stable release, checks its checksum, and puts the binary in `~/.local/bin`. It installs a systemd user service and an XDG autostart entry. On Fedora i3, `dex-autostart` starts the service when you log in. If your phone is already paired and the port is free, the installer starts the service right away.
 
-Rerun the installer to update. Your phone's pairing and firewall settings stay in place. If you started the old companion in a terminal, stop it with Ctrl+C, then run `systemctl --user start nullptr-companion.service`.
+If a companion is already running in a terminal, stop it with Ctrl+C and run `systemctl --user start nullptr-companion.service`. Rerun the installer to update. It preserves your pairing and firewall settings.
 
-To revoke the current pairing without uninstalling, run `./reset-pairing.sh`. It stops the service and deletes the desktop credential immediately. Follow the printed commands to show a fresh QR code and restart the service after pairing. You don't need to clear the Android app's data.
+To revoke the current pairing, run `./reset-pairing.sh`. It stops the service and deletes the desktop credential. Follow the printed commands to show a new QR code and restart the service after pairing. You can keep the Android app's data.
 
 Check the service with `systemctl --user status nullptr-companion.service`. Read errors with `journalctl --user -u nullptr-companion.service`.
 
-To stop the service and remove the installed companion and its login entry, run `./uninstall-companion.sh`. It asks whether to delete the pairing credential and keeps it by default, including when run without an interactive terminal. To choose without a prompt, pass `--purge` to delete the credential or `--keep-token` to keep it.
+Run `./uninstall-companion.sh` to stop the service and remove the binary, service file, and login entry. The script asks whether to delete the pairing credential. It keeps the credential by default and when run without a terminal. Use `--purge` to delete it or `--keep-token` to keep it without a prompt.
 
 ## Publish a release
 
-GitHub Actions builds both apps for pushes to `main` and pull requests. Download the debug APK and Linux companion from the workflow run's **Artifacts** section. Use the release APK for regular updates. CI debug APKs can use a different signing key on each run.
+GitHub Actions builds the Android app and Linux companion on pushes to `main` and on pull requests. Download the debug APK and companion from the run's **Artifacts** section. Use the release APK for updates because GitHub Actions can sign debug APKs with a different key on each run.
 
-To publish a [GitHub Release](https://github.com/jamestjw/nullptr/releases), push a new `vMAJOR.MINOR.PATCH` tag from `main`, for example:
+To publish a release, push a new `vMAJOR.MINOR.PATCH` tag from `main`. For example:
 
 ```sh
 git tag v0.1.0
 git push origin v0.1.0
 ```
 
-The workflow attaches the signed Android APK, the Linux x86-64 companion archive, and `SHA256SUMS.txt`. Use an increasing version tag so Android accepts the APK as an update.
+The workflow attaches the signed Android APK, the Linux x86-64 companion archive, and `SHA256SUMS.txt` to the GitHub release. Increase the version tag for each release so Android accepts the APK as an update.
 
 If you installed a debug APK, uninstall it before installing the first release APK, then pair again. Later release APKs install over the previous release and keep your pairing.
 
-The workflow uses the `ANDROID_KEYSTORE_BASE64` and `ANDROID_KEYSTORE_PASSWORD` repository secrets. Keep a backup of the PKCS#12 keystore and its password. The key alias is `nullptr`. Future Android updates must use the same key.
+GitHub Actions signs the release APK with the keystore in `ANDROID_KEYSTORE_BASE64` and unlocks it with `ANDROID_KEYSTORE_PASSWORD`. Back up the PKCS#12 keystore and password. Use the same signing key, with alias `nullptr`, for future updates.
