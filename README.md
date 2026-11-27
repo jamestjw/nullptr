@@ -31,3 +31,20 @@ mkdir -p companion/build
 ```
 
 The companion currently supports Linux desktops running X11. A future macOS companion can reuse the Android app and its pairing and input protocol.
+
+## Publish a release
+
+GitHub Actions builds both apps for pushes to `main` and pull requests. Download the debug APK and Linux companion from the workflow run's **Artifacts** section. Use the release APK for regular updates. CI debug APKs can use a different signing key on each run.
+
+To publish a [GitHub Release](https://github.com/jamestjw/nullptr/releases), push a new `vMAJOR.MINOR.PATCH` tag from `main`, for example:
+
+```sh
+git tag v0.1.0
+git push origin v0.1.0
+```
+
+The workflow attaches the signed Android APK, the Linux x86-64 companion archive, and `SHA256SUMS.txt`. Use an increasing version tag so Android accepts the APK as an update.
+
+If you installed a debug APK, uninstall it before installing the first release APK, then pair again. Later release APKs install over the previous release and keep your pairing.
+
+The workflow uses the `ANDROID_KEYSTORE_BASE64` and `ANDROID_KEYSTORE_PASSWORD` repository secrets. Keep a backup of the PKCS#12 keystore and its password. The key alias is `nullptr`. Future Android updates must use the same key.

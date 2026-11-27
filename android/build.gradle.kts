@@ -11,8 +11,8 @@ android {
         applicationId = "com.nullptr.trackpad"
         minSdk = 24
         targetSdk = 35
-        versionCode = 1
-        versionName = "0.1.0"
+        versionCode = providers.environmentVariable("ANDROID_VERSION_CODE").map(String::toInt).getOrElse(1)
+        versionName = providers.environmentVariable("ANDROID_VERSION_NAME").getOrElse("0.1.0")
     }
 
     compileOptions {
