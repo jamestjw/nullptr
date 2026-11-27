@@ -3,8 +3,16 @@
     "name": "nullptr RN trackpad",
     "slug": "nullptr-trackpad",
     "version": "0.1.0",
+    "icon": "./assets/trackpad.png",
     "android": {
-      "package": "com.nullptr.trackpad.reactnative"
+      "package": "com.nullptr.trackpad.reactnative",
+      "allowBackup": false,
+      "blockedPermissions": [
+        "android.permission.READ_EXTERNAL_STORAGE",
+        "android.permission.RECORD_AUDIO",
+        "android.permission.SYSTEM_ALERT_WINDOW",
+        "android.permission.WRITE_EXTERNAL_STORAGE"
+      ]
     },
     "ios": {
       "bundleIdentifier": "com.nullptr.trackpad.reactnative",
@@ -26,7 +34,8 @@
         "microphonePermission": false,
         "recordAudioAndroid": false
       }],
-      ["expo-secure-store", { "faceIDPermission": false }]
+      ["expo-secure-store", { "faceIDPermission": false, "configureAndroidBackup": false }],
+      "./plugins/withAndroidBuild"
     ]
   }
 }

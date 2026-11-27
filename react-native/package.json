@@ -3,7 +3,8 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "android": "react-native run-android --no-packager",
+    "android": "npm run prebuild:android && expo run:android --no-bundler",
+    "prebuild:android": "expo prebuild --platform android --no-install --clean --template expo-template-bare-minimum@57.0.36",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {

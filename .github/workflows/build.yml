@@ -70,6 +70,10 @@ jobs:
             exit 1
           fi
           printf 'ANDROID_VERSION_NAME=%s\nANDROID_VERSION_CODE=%s\n' "$version" "$code" >> "$GITHUB_ENV"
+      - name: Generate the React Native Android project
+        if: matrix.app == 'React Native'
+        working-directory: react-native
+        run: npm run prebuild:android
       - name: Run Android debug checks
         working-directory: ${{ matrix.directory }}
         run: ./gradlew --no-daemon ${{ matrix.debug-tasks }}

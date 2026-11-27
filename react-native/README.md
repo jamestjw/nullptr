@@ -7,6 +7,7 @@ Run these commands from the React Native app directory, which contains this READ
 ```sh
 npm ci &&
   npm run typecheck &&
+  npm run prebuild:android &&
   (cd android && ./gradlew :app:assembleDebug)
 ```
 
@@ -16,7 +17,9 @@ After the build succeeds, install the APK:
 adb install -r android/app/build/outputs/apk/debug/app-debug.apk
 ```
 
-The debug APK includes the JavaScript bundle and runs without Metro. Update the desktop companion to a build from the same checkout before pairing. The Kotlin app still works with the updated companion.
+Expo generates `android/` from the app configuration. GitHub Actions runs the same generation step before it builds the debug and release APKs. The debug APK includes the JavaScript bundle and runs without Metro.
+
+Update the desktop companion to a build from the same checkout before pairing. The Kotlin app still works with the updated companion.
 
 Open **nullptr RN trackpad** and use the companion's pairing code or QR. If you used an earlier React Native build, pair again and set your preferences again. This build uses the operating system's secure storage for the pairing credential.
 

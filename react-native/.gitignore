@@ -1,7 +1,5 @@
 node_modules/
 .expo/
-ios/
-.cxx/
-android/.idea/
+/android/
+/ios/
 *.hprof
-!android/gradle/wrapper/gradle-wrapper.jar
