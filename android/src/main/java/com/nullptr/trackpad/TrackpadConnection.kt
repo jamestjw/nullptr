@@ -36,7 +36,9 @@ class TailnetAddress private constructor(val host: String, val port: Int) {
     }
 }
 
-data class PairedComputer(val address: TailnetAddress, val token: String)
+data class PairedComputer(val address: TailnetAddress, val token: String, val name: String? = null) {
+    val displayName: String get() = name ?: address.toString()
+}
 
 enum class MouseButton(val wireName: String) {
     LEFT("left"),

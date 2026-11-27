@@ -7,6 +7,8 @@
 
 Keep the companion running while you use the trackpad. Tap to click. Hold and slide to drag. Slide two fingers to scroll, or tap with two fingers to right-click. Open **Settings** to adjust pointer sensitivity or reverse scrolling.
 
+Open **Devices** on the trackpad to pair another computer, rename a saved computer, or switch to it. The app remembers your selection and sends input to one computer at a time.
+
 Tap **Keyboard** to type into the focused desktop window. If your phone keyboard shows a word in its suggestion bar, press Space or pick the suggestion to send it. Swipe the row above the keyboard for Backspace, Enter, Tab, Escape, and the arrow keys.
 
 The companion uses the active X11 layout. It sends characters you can type with an unmodified key or Shift. If **Keyboard** is disabled while the trackpad is connected, update the companion.

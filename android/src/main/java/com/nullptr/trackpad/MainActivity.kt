@@ -1,5 +1,6 @@
 package com.nullptr.trackpad
 
+import android.app.AlertDialog
 import android.content.Context
 import android.graphics.Color
 import android.graphics.Typeface
@@ -30,17 +31,19 @@ import com.journeyapps.barcodescanner.ScanContract
 import com.journeyapps.barcodescanner.ScanOptions
 
 class MainActivity : ComponentActivity() {
-    private enum class Screen { PAIRING, TRACKPAD, SETTINGS }
+    private enum class Screen { PAIRING, TRACKPAD, DEVICES, SETTINGS }
 
     private val backgroundColor = Color.rgb(17, 22, 28)
     private val accent = Color.rgb(168, 233, 202)
     private val textColor = Color.rgb(236, 243, 249)
     private val muted = Color.rgb(170, 183, 195)
     private val prefs by lazy { getSharedPreferences("trackpad", Context.MODE_PRIVATE) }
+    private val computers by lazy { SavedComputers(prefs) }
     private lateinit var connection: TrackpadConnection
     private lateinit var root: LinearLayout
     private lateinit var pad: TouchpadView
     private lateinit var status: TextView
+    private lateinit var pairAgain: Button
     private lateinit var keyboardInput: KeyboardInput
     private lateinit var keyboardButton: Button
     private lateinit var specialKeys: HorizontalScrollView
@@ -52,14 +55,20 @@ class MainActivity : ComponentActivity() {
     private lateinit var submit: Button
     private lateinit var scan: Button
     private var cancel: Button? = null
-    private var paired: PairedComputer? = null
     private var screen = Screen.PAIRING
+    private var pairingReturn = Screen.DEVICES
     private var foregroundActivity = false
-    private val settingsBack = object : OnBackPressedCallback(false) {
-        override fun handleOnBackPressed() = showTrackpad()
+    private val navigationBack = object : OnBackPressedCallback(false) {
+        override fun handleOnBackPressed() {
+            when (screen) {
+                Screen.PAIRING -> if (submit.isEnabled) leavePairing()
+                Screen.DEVICES, Screen.SETTINGS -> showTrackpad()
+                Screen.TRACKPAD -> Unit
+            }
+        }
     }
     private val scanPairing = registerForActivityResult(ScanContract()) { result ->
-        result.contents?.let(::readPairingQr)
+        if (screen == Screen.PAIRING && submit.isEnabled) result.contents?.let(::readPairingQr)
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -67,25 +76,23 @@ class MainActivity : ComponentActivity() {
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         WindowCompat.setDecorFitsSystemWindows(window, false)
         connection = TrackpadConnection(::renderConnection, ::showKeyboardIssue)
-        onBackPressedDispatcher.addCallback(this, settingsBack)
-        val address = TailnetAddress.parse(prefs.getString("address", "").orEmpty())
-        val token = prefs.getString("token", "").orEmpty()
-        if (address != null && token.isNotBlank()) paired = PairedComputer(address, token)
+        onBackPressedDispatcher.addCallback(this, navigationBack)
         val savedScreen = savedInstanceState?.getString("screen")
-        if (paired == null || savedScreen == Screen.PAIRING.name) {
-            showPairing()
-            addressField.setText(savedInstanceState?.getString("address") ?: paired?.address?.toString())
-        } else if (savedScreen == Screen.SETTINGS.name) {
-            showSettings()
-        } else {
-            showTrackpad()
+        when {
+            computers.active == null || savedScreen == Screen.PAIRING.name -> {
+                val fromTrackpad = savedInstanceState?.getString("pairingReturn") == Screen.TRACKPAD.name
+                showPairing(savedInstanceState?.getString("address"), fromTrackpad = fromTrackpad)
+            }
+            savedScreen == Screen.DEVICES.name -> showDevices()
+            savedScreen == Screen.SETTINGS.name -> showSettings()
+            else -> showTrackpad()
         }
     }
 
     override fun onStart() {
         super.onStart()
         foregroundActivity = true
-        if (screen != Screen.PAIRING) paired?.let(connection::start)
+        startSelected()
     }
 
     override fun onStop() {
@@ -101,7 +108,10 @@ class MainActivity : ComponentActivity() {
 
     override fun onSaveInstanceState(outState: Bundle) {
         outState.putString("screen", screen.name)
-        if (screen == Screen.PAIRING) outState.putString("address", addressField.text.toString())
+        if (screen == Screen.PAIRING) {
+            outState.putString("address", addressField.text.toString())
+            outState.putString("pairingReturn", pairingReturn.name)
+        }
         super.onSaveInstanceState(outState)
     }
 
@@ -122,9 +132,11 @@ class MainActivity : ComponentActivity() {
         pair()
     }
 
-    private fun showPairing() {
-        if (screen == Screen.TRACKPAD) closeKeyboard(commit = false)
+    private fun showPairing(address: String? = null, fromTrackpad: Boolean = false) {
+        leaveTrackpad()
         screen = Screen.PAIRING
+        pairingReturn = if (fromTrackpad) Screen.TRACKPAD else Screen.DEVICES
+        navigationBack.isEnabled = computers.active != null
         connection.stop()
         buildRoot()
         val scroll = ScrollView(this).apply { isFillViewport = true }
@@ -151,6 +163,7 @@ class MainActivity : ComponentActivity() {
             hint = "100.x.x.x:47822"
             setSingleLine()
             inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_URI
+            setText(address)
         }
         form.addView(label("Tailscale address", 14, textColor), spaced(top = 14))
         form.addView(addressField)
@@ -166,8 +179,9 @@ class MainActivity : ComponentActivity() {
         form.addView(pairStatus, spaced(top = 8))
         submit = button("Pair computer", prominent = true, action = ::pair)
         form.addView(submit, spaced(top = 8))
-        cancel = paired?.let {
-            button("Back to trackpad") { resumeTrackpad() }.also { form.addView(it, spaced(top = 8)) }
+        cancel = computers.active?.let {
+            val text = if (fromTrackpad) "Back to trackpad" else "Back to devices"
+            button(text, action = ::leavePairing).also { form.addView(it, spaced(top = 8)) }
         }
         form.requestFocus()
     }
@@ -185,9 +199,9 @@ class MainActivity : ComponentActivity() {
         connection.pair(address, code) { result ->
             setPairingEnabled(true)
             result.onSuccess { computer ->
-                prefs.edit().putString("address", computer.address.toString()).putString("token", computer.token).apply()
-                paired = computer
-                resumeTrackpad()
+                computers.pair(computer)
+                showTrackpad()
+                startSelected()
             }.onFailure {
                 setPairStatus(it.message ?: "Could not pair with the computer.", error = true)
             }
@@ -207,41 +221,56 @@ class MainActivity : ComponentActivity() {
         pairStatus.setTextColor(if (error) Color.rgb(255, 179, 171) else muted)
     }
 
-    private fun resumeTrackpad() {
-        showTrackpad()
-        if (foregroundActivity) paired?.let(connection::start)
+    private fun leavePairing() {
+        if (pairingReturn == Screen.TRACKPAD) showTrackpad() else showDevices()
+        startSelected()
+    }
+
+    private fun startSelected() {
+        if (foregroundActivity && screen != Screen.PAIRING) computers.active?.let(connection::start)
+    }
+
+    private fun leaveTrackpad() {
+        if (screen != Screen.TRACKPAD) return
+        pad.reset()
+        closeKeyboard(commit = false)
     }
 
     private fun showTrackpad() {
         screen = Screen.TRACKPAD
-        settingsBack.isEnabled = false
+        navigationBack.isEnabled = false
         buildRoot()
-        val header = LinearLayout(this).apply { gravity = Gravity.CENTER_VERTICAL }
-        val heading = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
-        heading.addView(label("NULLPTR", 12, accent, bold = true))
-        heading.addView(label("Trackpad", 28, textColor, bold = true))
-        header.addView(heading, LinearLayout.LayoutParams(0, -2, 1f))
-        header.addView(button("Pair") {
-            val lastAddress = paired?.address?.toString()
-            showPairing()
-            addressField.setText(lastAddress)
-        })
-        header.addView(button("Settings", action = ::showSettings), LinearLayout.LayoutParams(-2, -2).apply {
+        val trackpadRoot = root
+        fun acceptsInput() = foregroundActivity && screen == Screen.TRACKPAD && root === trackpadRoot
+        val header = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+        val toolbar = LinearLayout(this).apply { gravity = Gravity.CENTER_VERTICAL }
+        toolbar.addView(label("NULLPTR", 12, accent, bold = true), LinearLayout.LayoutParams(0, -2, 1f))
+        toolbar.addView(button("Devices", action = ::showDevices))
+        toolbar.addView(button("Settings", action = ::showSettings), LinearLayout.LayoutParams(-2, -2).apply {
             marginStart = dp(8)
         })
+        header.addView(toolbar)
+        header.addView(label("Trackpad", 28, textColor, bold = true))
         root.addView(header)
         status = label("", 14, muted).apply { accessibilityLiveRegion = View.ACCESSIBILITY_LIVE_REGION_POLITE }
         root.addView(status, spaced(top = 6))
+        pairAgain = button("Pair again") { showPairing(computers.active?.address?.toString(), fromTrackpad = true) }
+        root.addView(pairAgain, spaced(top = 8))
         pad = TouchpadView(this) { event ->
-            if (event is InputEvent.Button && event.down) keyboardInput.finishBeforePointerPress()
-            connection.send(event)
+            if (acceptsInput()) {
+                if (event is InputEvent.Button && event.down) keyboardInput.finishBeforePointerPress()
+                connection.send(event)
+            }
         }
         pad.sensitivity = 0.4f + savedSensitivity() / 50f
         pad.invertScroll = prefs.getBoolean("invertScroll", false)
         root.addView(pad, LinearLayout.LayoutParams(-1, 0, 1f).apply { topMargin = dp(14) })
         val gestureHelp = label("Tap to click · Hold to drag · Two fingers to scroll or right-click", 13, muted)
         root.addView(gestureHelp, spaced(top = 10))
-        keyboardInput = KeyboardInput(this, connection::sendKeyboard).apply { isVisible = false }
+        keyboardInput = KeyboardInput(this) { event ->
+            acceptsInput() && connection.sendKeyboard(event)
+        }.apply { isVisible = false }
+        val trackpadKeyboard = keyboardInput
         root.addView(keyboardInput, LinearLayout.LayoutParams(1, 1))
         val keyboardRow = LinearLayout(this).apply { gravity = Gravity.CENTER_VERTICAL }
         specialKeys = HorizontalScrollView(this).apply {
@@ -250,7 +279,7 @@ class MainActivity : ComponentActivity() {
             contentDescription = "Special keys. Scroll for more."
             addView(LinearLayout(this@MainActivity).apply {
                 KeyboardKey.entries.forEach { key ->
-                    addView(button(key.label) { keyboardInput.tap(key) }.apply {
+                    addView(button(key.label) { trackpadKeyboard.tap(key) }.apply {
                         contentDescription = key.wireName.replaceFirstChar { it.uppercase() }
                         minWidth = dp(48)
                         minimumWidth = dp(48)
@@ -261,7 +290,8 @@ class MainActivity : ComponentActivity() {
         }
         var imeVisible = false
         keyboardButton = button("Keyboard") {
-            if (keyboardInput.isVisible) {
+            if (!acceptsInput()) return@button
+            if (trackpadKeyboard.isVisible) {
                 closeKeyboard(commit = true)
             } else {
                 specialKeys.isVisible = true
@@ -278,11 +308,13 @@ class MainActivity : ComponentActivity() {
         }
         root.addView(keyboardNotice, spaced(top = 6))
         ViewCompat.setOnApplyWindowInsetsListener(keyboardRow) { _, insets ->
+            if (root !== trackpadRoot) return@setOnApplyWindowInsetsListener insets
             val wasVisible = imeVisible
             imeVisible = insets.isVisible(WindowInsetsCompat.Type.ime())
             if (wasVisible && !imeVisible) closeKeyboard(commit = true)
             header.isVisible = !imeVisible
             status.isVisible = !imeVisible
+            pairAgain.isVisible = !imeVisible && connection.status == TrackpadConnection.Status.UNPAIRED
             gestureHelp.isVisible = !imeVisible
             insets
         }
@@ -308,13 +340,102 @@ class MainActivity : ComponentActivity() {
         keyboardNotice.postDelayed(expireKeyboardNotice, 5_000)
     }
 
-    private fun showSettings() {
-        if (screen == Screen.TRACKPAD) {
-            pad.reset()
-            closeKeyboard(commit = false)
+    private fun showDevices() {
+        leaveTrackpad()
+        screen = Screen.DEVICES
+        navigationBack.isEnabled = true
+        buildRoot()
+        val scroll = ScrollView(this)
+        val list = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+        root.addView(scroll, LinearLayout.LayoutParams(-1, -1))
+        scroll.addView(list)
+        list.addView(label("NULLPTR", 12, accent, bold = true))
+        list.addView(label("Devices", 28, textColor, bold = true), spaced(top = 6))
+        list.addView(button("Add computer", prominent = true) { showPairing() }, spaced(top = 16))
+        computers.all.forEach { computer ->
+            val active = computer == computers.active
+            list.addView(label(computer.displayName, 18, textColor, bold = true), spaced(top = 18))
+            if (computer.name != null) list.addView(label(computer.address.toString(), 14, muted))
+            if (active) list.addView(label("Current computer", 14, accent))
+            val actions = LinearLayout(this)
+            if (!active) {
+                actions.addView(button("Use") {
+                    computers.select(computer.address)
+                    startSelected()
+                    showTrackpad()
+                }.apply { contentDescription = "Use ${computer.displayName}" })
+            }
+            actions.addView(button("Manage") { manageComputer(computer) }.apply {
+                contentDescription = "Manage ${computer.displayName}"
+            }, LinearLayout.LayoutParams(-2, -2).apply { if (!active) marginStart = dp(8) })
+            list.addView(actions, spaced(top = 6))
         }
+        list.addView(button("Back to trackpad", action = ::showTrackpad), spaced(top = 24))
+    }
+
+    private fun manageComputer(computer: PairedComputer) {
+        AlertDialog.Builder(this)
+            .setTitle(computer.displayName)
+            .setItems(arrayOf("Rename", "Pair again", "Forget")) { _, action ->
+                when (action) {
+                    0 -> renameComputer(computer)
+                    1 -> showPairing(computer.address.toString())
+                    2 -> forgetComputer(computer)
+                }
+            }
+            .show()
+    }
+
+    private fun renameComputer(computer: PairedComputer) {
+        val name = EditText(this).apply {
+            setSingleLine()
+            inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_CAP_SENTENCES
+            filters = arrayOf(InputFilter.LengthFilter(48))
+            hint = computer.address.toString()
+            setText(computer.name)
+            setSelection(length())
+        }
+        val content = LinearLayout(this).apply {
+            setPadding(dp(24), 0, dp(24), 0)
+            addView(name, LinearLayout.LayoutParams(-1, -2))
+        }
+        val dialog = AlertDialog.Builder(this)
+            .setTitle("Rename computer")
+            .setMessage("Leave the name blank to use its address.")
+            .setView(content)
+            .setNegativeButton("Cancel", null)
+            .setPositiveButton("Save") { _, _ ->
+                computers.rename(computer.address, name.text.toString())
+                showDevices()
+            }
+            .create()
+        name.requestFocus()
+        dialog.window?.setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_STATE_ALWAYS_VISIBLE)
+        dialog.show()
+    }
+
+    private fun forgetComputer(computer: PairedComputer) {
+        AlertDialog.Builder(this)
+            .setTitle("Forget ${computer.displayName}?")
+            .setMessage("You'll need a new pairing code to use this computer again.")
+            .setNegativeButton("Cancel", null)
+            .setPositiveButton("Forget") { _, _ ->
+                val wasActive = computer == computers.active
+                computers.forget(computer.address)
+                if (computers.active == null) {
+                    showPairing()
+                } else {
+                    if (wasActive) startSelected()
+                    showDevices()
+                }
+            }
+            .show()
+    }
+
+    private fun showSettings() {
+        leaveTrackpad()
         screen = Screen.SETTINGS
-        settingsBack.isEnabled = true
+        navigationBack.isEnabled = true
         buildRoot()
         val scroll = ScrollView(this)
         val settings = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
@@ -366,15 +487,16 @@ class MainActivity : ComponentActivity() {
             expireKeyboardNotice.run()
         }
         keyboardButton.isEnabled = keyboardReady
-        val address = paired?.address
+        val target = computers.active?.displayName
         status.text = when (state) {
-            TrackpadConnection.Status.IDLE -> address?.let { "Saved computer · $it" } ?: "No computer paired"
-            TrackpadConnection.Status.CONNECTING -> "Connecting to $address…"
-            TrackpadConnection.Status.CONNECTED -> if (keyboardReady) "Connected · $address"
-                else "Connected · $address\nUpdate the companion to use Keyboard."
-            TrackpadConnection.Status.RETRYING -> "Connection lost. Retrying…"
-            TrackpadConnection.Status.UNPAIRED -> "Pairing expired or was replaced. Pair again."
+            TrackpadConnection.Status.IDLE -> "Saved computer · $target"
+            TrackpadConnection.Status.CONNECTING -> "Connecting to $target…"
+            TrackpadConnection.Status.CONNECTED -> if (keyboardReady) "Connected · $target"
+                else "Connected · $target\nUpdate the companion to use Keyboard."
+            TrackpadConnection.Status.RETRYING -> "Connection lost · $target\nRetrying…"
+            TrackpadConnection.Status.UNPAIRED -> "Pairing expired or was replaced · $target"
         }
+        pairAgain.isVisible = state == TrackpadConnection.Status.UNPAIRED
         status.setTextColor(if (ready) accent else muted)
     }
 
