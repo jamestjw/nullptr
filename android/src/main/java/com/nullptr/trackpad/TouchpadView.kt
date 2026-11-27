@@ -13,6 +13,7 @@ import kotlin.math.abs
 
 class TouchpadView(context: Context, private val send: (InputEvent) -> Unit) : View(context) {
     var sensitivity = 1f
+    var invertScroll = false
 
     private enum class Phase { TAP, MOVE, DRAG }
 
@@ -158,7 +159,8 @@ class TouchpadView(context: Context, private val send: (InputEvent) -> Unit) : V
                     current.tap = false
                 }
                 val point = midpoint(first, second)
-                accumulate(point, current.last, 1f / (24 * density))
+                val direction = if (invertScroll) -1f else 1f
+                accumulate(point, current.last, direction / (24 * density))
                 current.last = point
             }
             is Gesture.FinishingTap -> {
