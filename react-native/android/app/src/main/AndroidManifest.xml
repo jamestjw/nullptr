@@ -1,12 +1,15 @@
-<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
     <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.RECORD_AUDIO" tools:node="remove" />
     <uses-feature android:name="android.hardware.camera" android:required="false" />
     <uses-feature android:name="android.hardware.camera.autofocus" android:required="false" />
 
     <application
         android:name=".MainApplication"
         android:allowBackup="false"
-        android:dataExtractionRules="@xml/data_extraction_rules"
+        android:dataExtractionRules="@xml/trackpad_data_extraction_rules"
+        android:fullBackupContent="@xml/secure_store_backup_rules"
         android:icon="@drawable/ic_trackpad"
         android:label="nullptr RN trackpad"
         android:usesCleartextTraffic="true"

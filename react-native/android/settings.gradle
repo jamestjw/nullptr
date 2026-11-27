@@ -1,8 +1,16 @@
-pluginManagement { includeBuild("../node_modules/@react-native/gradle-plugin") }
-plugins { id("com.facebook.react.settings") }
-extensions.configure(com.facebook.react.ReactSettingsExtension) { settings ->
-    settings.autolinkLibrariesFromCommand()
+pluginManagement {
+    includeBuild("../node_modules/@react-native/gradle-plugin")
+    includeBuild("../node_modules/expo-modules-autolinking/android/expo-gradle-plugin")
 }
+plugins {
+    id("com.facebook.react.settings")
+    id("expo-autolinking-settings")
+}
+extensions.configure(com.facebook.react.ReactSettingsExtension) { settings ->
+    settings.autolinkLibrariesFromCommand(expoAutolinking.rnConfigCommand)
+}
+expoAutolinking.useExpoModules()
+expoAutolinking.useExpoVersionCatalog()
 rootProject.name = "NullptrTrackpad"
 include(":app")
 includeBuild("../node_modules/@react-native/gradle-plugin")

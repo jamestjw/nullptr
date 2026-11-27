@@ -1,9 +1,12 @@
 import Slider from '@react-native-community/slider';
+import { CameraView, useCameraPermissions } from 'expo-camera';
+import { useKeepAwake } from 'expo-keep-awake';
 import React, { useEffect, useRef, useState } from 'react';
 import {
+  AppState,
   BackHandler,
-  DeviceEventEmitter,
   Keyboard,
+  Modal,
   Pressable,
   ScrollView,
   StatusBar,
@@ -15,8 +18,10 @@ import {
 } from 'react-native';
 import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
 import Touchpad from './src/Touchpad';
-import { sendInput, trackpad } from './src/trackpadNative';
-import type { ConnectionStatus, Settings } from './src/trackpadNative';
+import { connect, pair, parsePairingQr } from './src/connection';
+import type { Computer, ConnectionStatus } from './src/connection';
+import { defaultSettings, load, saveComputer, saveSettings } from './src/storage';
+import type { Settings } from './src/storage';
 
 type Screen = 'loading' | 'pairing' | 'trackpad' | 'settings' | 'error';
 type PairingStatus =
@@ -75,34 +80,50 @@ function PairingScreen({
   onCancel,
 }: {
   savedAddress: string | null;
-  onPaired: (address: string) => void;
+  onPaired: (computer: Computer) => void;
   onCancel: () => void;
 }) {
   const [address, setAddress] = useState(savedAddress ?? '');
   const [code, setCode] = useState('');
   const [status, setStatus] = useState<PairingStatus>({ kind: 'idle' });
+  const [permission, requestPermission] = useCameraPermissions();
   const operation = useRef(false);
+  const scanning = useRef(false);
   const busy = status.kind === 'scanning' || status.kind === 'pairing';
 
-  async function submit(scanning: boolean) {
+  async function scan() {
     if (operation.current) return;
     operation.current = true;
+    Keyboard.dismiss();
     try {
-      let pairing = { address, code };
-      Keyboard.dismiss();
-      if (scanning) {
-        setStatus({ kind: 'scanning' });
-        const scanned = await trackpad.scan();
-        if (scanned === null) {
-          setStatus({ kind: 'idle' });
-          return;
-        }
-        pairing = scanned;
-        setAddress(scanned.address);
-        setCode(scanned.code);
+      if (!(permission?.granted || (await requestPermission()).granted)) {
+        setStatus({ kind: 'error', message: 'Allow camera access in your phone settings, or pair manually.' });
+        return;
       }
-      setStatus({ kind: 'pairing', message: `Pairing with ${pairing.address.trim()}…` });
-      onPaired(await trackpad.pair(pairing.address, pairing.code));
+      scanning.current = true;
+      setStatus({ kind: 'scanning' });
+    } catch {
+      setStatus({ kind: 'error', message: 'Could not open the QR scanner.' });
+    } finally {
+      operation.current = false;
+    }
+  }
+
+  async function submit(qr?: string) {
+    if (operation.current || (qr !== undefined && !scanning.current)) return;
+    scanning.current = false;
+    operation.current = true;
+    try {
+      Keyboard.dismiss();
+      const details = qr === undefined ? { address, code } : parsePairingQr(qr);
+      if (qr !== undefined) {
+        setAddress(details.address);
+        setCode(details.code);
+      }
+      setStatus({ kind: 'pairing', message: `Pairing with ${details.address.trim()}…` });
+      const computer = await pair(details.address, details.code);
+      await saveComputer(computer);
+      onPaired(computer);
     } catch (error) {
       setStatus({
         kind: 'error',
@@ -113,11 +134,31 @@ function PairingScreen({
     }
   }
 
+  function closeScanner(next: PairingStatus) {
+    if (!scanning.current) return;
+    scanning.current = false;
+    setStatus(next);
+  }
+
   return (
     <ScrollView keyboardShouldPersistTaps="handled" contentContainerStyle={styles.form}>
       <Heading title="Pair a computer" />
       <Text style={styles.muted}>Run the companion on your computer with Tailscale connected.</Text>
-      <Button label="Scan pairing QR" onPress={() => submit(true)} disabled={busy} />
+      <Button label="Scan pairing QR" onPress={scan} disabled={busy} />
+      {status.kind === 'scanning' && (
+        <Modal onRequestClose={() => closeScanner({ kind: 'idle' })}>
+          <SafeAreaView style={[styles.root, styles.content]}>
+            <Text style={styles.label}>Scan the QR code printed by the companion</Text>
+            <CameraView
+              style={styles.pad}
+              barcodeScannerSettings={{ barcodeTypes: ['qr'] }}
+              onBarcodeScanned={({ data }) => { void submit(data); }}
+              onMountError={() => closeScanner({ kind: 'error', message: 'Could not open the QR scanner.' })}
+            />
+            <Button label="Cancel" onPress={() => closeScanner({ kind: 'idle' })} />
+          </SafeAreaView>
+        </Modal>
+      )}
       <Text style={styles.muted}>Or enter the details manually</Text>
       <View style={styles.field}>
         <Text style={styles.label}>Tailscale address</Text>
@@ -144,7 +185,7 @@ function PairingScreen({
           keyboardType="visible-password"
           maxLength={12}
           onChangeText={setCode}
-          onSubmitEditing={() => submit(false)}
+          onSubmitEditing={() => submit()}
           placeholder="12 characters"
           placeholderTextColor={palette.muted}
           style={styles.input}
@@ -156,7 +197,7 @@ function PairingScreen({
           {status.message}
         </Text>
       )}
-      <Button label="Pair computer" primary onPress={() => submit(false)} disabled={busy} />
+      <Button label="Pair computer" primary onPress={() => submit()} disabled={busy} />
       {savedAddress && <Button label="Back to trackpad" onPress={onCancel} disabled={busy} />}
     </ScrollView>
   );
@@ -184,20 +225,14 @@ function SettingsScreen({
         minimumTrackTintColor={palette.accent}
         maximumTrackTintColor={palette.button}
         thumbTintColor={palette.accent}
-        onValueChange={sensitivity => {
-          trackpad.setSensitivity(sensitivity);
-          onChange(previous => ({ ...previous, sensitivity }));
-        }}
+        onValueChange={sensitivity => onChange(previous => ({ ...previous, sensitivity }))}
       />
       <View style={styles.row}>
         <Text style={styles.label}>Invert scroll</Text>
         <Switch
           accessibilityLabel="Invert scroll"
           value={settings.invertScroll}
-          onValueChange={invertScroll => {
-            trackpad.setInvertScroll(invertScroll);
-            onChange(previous => ({ ...previous, invertScroll }));
-          }}
+          onValueChange={invertScroll => onChange(previous => ({ ...previous, invertScroll }))}
         />
       </View>
       <Text style={styles.muted}>Reverse the direction of two-finger scrolling.</Text>
@@ -207,33 +242,64 @@ function SettingsScreen({
 }
 
 export default function App() {
+  useKeepAwake();
   const [screen, setScreen] = useState<Screen>('loading');
-  const [address, setAddress] = useState<string | null>(null);
-  const [settings, setSettings] = useState<Settings>({ sensitivity: 30, invertScroll: false });
+  const [computer, setComputer] = useState<Computer | null>(null);
+  const [settings, setSettings] = useState(defaultSettings);
+  const [settingsError, setSettingsError] = useState(false);
   const [status, setStatus] = useState<ConnectionStatus>('IDLE');
+  const connection = useRef<ReturnType<typeof connect> | null>(null);
+  const settingsWrites = useRef(Promise.resolve());
+  const address = computer?.address ?? null;
   const wantsConnection = screen === 'trackpad' || screen === 'settings';
 
   useEffect(() => {
     let active = true;
-    const subscription = DeviceEventEmitter.addListener('trackpadStatus', setStatus);
-    trackpad.load().then(saved => {
+    load().then(saved => {
       if (!active) return;
-      setAddress(saved.address);
-      setSettings({ sensitivity: saved.sensitivity, invertScroll: saved.invertScroll });
-      setScreen(saved.address ? 'trackpad' : 'pairing');
+      setComputer(saved.computer);
+      setSettings(saved.settings);
+      setScreen(saved.computer ? 'trackpad' : 'pairing');
     }).catch(() => {
       if (active) setScreen('error');
     });
     return () => {
       active = false;
-      subscription.remove();
-      trackpad.setConnectionEnabled(false);
     };
   }, []);
 
   useEffect(() => {
-    trackpad.setConnectionEnabled(wantsConnection);
-  }, [wantsConnection]);
+    if (!wantsConnection || !computer) return;
+    const paired = computer;
+    function update(state: string | null) {
+      if (state === 'active') {
+        connection.current ??= connect(paired, setStatus);
+      } else {
+        connection.current?.stop();
+        connection.current = null;
+        setStatus('IDLE');
+      }
+    }
+    const subscription = AppState.addEventListener('change', update);
+    update(AppState.currentState);
+    return () => {
+      subscription.remove();
+      connection.current?.stop();
+      connection.current = null;
+    };
+  }, [computer, wantsConnection]);
+
+  useEffect(() => {
+    if (!wantsConnection) return;
+    settingsWrites.current = settingsWrites.current.then(async () => {
+      try {
+        await saveSettings(settings);
+        setSettingsError(false);
+      } catch {
+        setSettingsError(true);
+      }
+    });
+  }, [settings, wantsConnection]);
 
   useEffect(() => {
     if (screen !== 'settings') return;
@@ -250,18 +316,20 @@ export default function App() {
     CONNECTED: `Connected · ${address}`,
     RETRYING: 'Connection lost. Retrying…',
     UNPAIRED: 'Pairing expired or was replaced. Pair again.',
+    UPDATE_REQUIRED: 'Update the companion on your computer.',
   };
 
   return (
     <SafeAreaProvider style={styles.root}>
       <StatusBar barStyle="light-content" />
       <SafeAreaView style={styles.content}>
+        {settingsError && <Text style={styles.error}>Could not save trackpad settings.</Text>}
         {screen === 'error' && <Text style={styles.error}>Could not load the saved trackpad settings.</Text>}
         {screen === 'pairing' && (
           <PairingScreen
             savedAddress={address}
-            onPaired={pairedAddress => {
-              setAddress(pairedAddress);
+            onPaired={pairedComputer => {
+              setComputer(pairedComputer);
               setScreen('trackpad');
             }}
             onCancel={() => setScreen('trackpad')}
@@ -285,7 +353,7 @@ export default function App() {
                 enabled={status === 'CONNECTED'}
                 sensitivity={0.4 + settings.sensitivity / 50}
                 invertScroll={settings.invertScroll}
-                send={sendInput}
+                send={event => connection.current?.send(event)}
               />
             </View>
             <Text style={styles.hint}>Tap to click · Hold to drag · Two fingers to scroll or right-click</Text>

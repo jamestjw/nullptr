@@ -5,17 +5,12 @@ apply plugin: "com.facebook.react"
 react {
     autolinkLibrariesWithApp()
     debuggableVariants = []
+    cliFile = file(providers.exec {
+        workingDir(rootDir)
+        commandLine("node", "--print", "require.resolve('@expo/cli', { paths: [require.resolve('expo/package.json')] })")
+    }.standardOutput.asText.get().trim())
+    bundleCommand = "export:embed"
 }
-
-def originalApp = rootProject.file("../../android/src/main")
-def transportSources = layout.buildDirectory.dir("generated/trackpadTransport")
-def sharedSources = tasks.register("syncTrackpadTransport", Sync) {
-    from(new File(originalApp, "java")) {
-        include("com/nullptr/trackpad/TrackpadConnection.kt")
-    }
-    into(transportSources)
-}
-tasks.named("preBuild").configure { dependsOn(sharedSources) }
 
 android {
     namespace "com.nullptr.trackpad.reactnative"
@@ -30,14 +25,9 @@ android {
         versionCode providers.environmentVariable("ANDROID_VERSION_CODE").map { it.toInteger() }.getOrElse(1)
         versionName providers.environmentVariable("ANDROID_VERSION_NAME").getOrElse("0.1.0")
     }
-
-    sourceSets.main.res.srcDir(new File(originalApp, "res"))
-    sourceSets.main.java.srcDir(transportSources)
 }
 
 dependencies {
     implementation("com.facebook.react:react-android")
     implementation("com.facebook.react:hermes-android")
-    implementation("com.squareup.okhttp3:okhttp:4.12.0")
-    implementation("com.journeyapps:zxing-android-embedded:4.3.0")
 }

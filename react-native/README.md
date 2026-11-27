@@ -16,4 +16,10 @@ After the build succeeds, install the APK:
 adb install -r android/app/build/outputs/apk/debug/app-debug.apk
 ```
 
-The debug APK includes the JavaScript bundle and runs without Metro. The React Native app builds against the Kotlin transport in `../android` and uses the same companion. It installs alongside the Kotlin app and stores its pairing and settings separately. Open **nullptr RN trackpad** and use the companion's pairing code or QR.
+The debug APK includes the JavaScript bundle and runs without Metro. Update the desktop companion to a build from the same checkout before pairing. The Kotlin app still works with the updated companion.
+
+Open **nullptr RN trackpad** and use the companion's pairing code or QR. If you used an earlier React Native build, pair again and set your preferences again. This build uses the operating system's secure storage for the pairing credential.
+
+## Generate the iOS project
+
+On macOS with Xcode and CocoaPods, run `npm ci`, then `npx expo prebuild --platform ios` from this directory. Open the generated `.xcworkspace` in Xcode and select your signing team. The generated iOS project and Android host use the same TypeScript app.

@@ -21,6 +21,7 @@ const (
 	inputTimeout = 15 * time.Second
 	pingInterval = 5 * time.Second
 	writeTimeout = time.Second
+	nativeOrigin = "https://nullptr.invalid"
 )
 
 var tailnet = netip.MustParsePrefix("100.64.0.0/10")
@@ -41,6 +42,7 @@ func (c *companion) handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("POST /v1/pair", c.pair)
 	mux.HandleFunc("GET /v1/input", c.input)
+	mux.HandleFunc("GET /v1/status", c.status)
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		host, _, err := net.SplitHostPort(r.RemoteAddr)
 		peer, parseErr := netip.ParseAddr(host)
@@ -48,12 +50,18 @@ func (c *companion) handler() http.Handler {
 			http.Error(w, "Tailscale IPv4 required", http.StatusForbidden)
 			return
 		}
-		if _, present := r.Header["Origin"]; present {
+		if _, present := r.Header["Origin"]; present &&
+			(r.Method != http.MethodGet || r.URL.Path != "/v1/input" || !inputOriginAllowed(r)) {
 			http.Error(w, "browser origin forbidden", http.StatusForbidden)
 			return
 		}
 		mux.ServeHTTP(w, r)
 	})
+}
+
+func inputOriginAllowed(r *http.Request) bool {
+	origins, present := r.Header["Origin"]
+	return !present || (len(origins) == 1 && origins[0] == nativeOrigin)
 }
 
 func (c *companion) pair(w http.ResponseWriter, r *http.Request) {
@@ -125,6 +133,15 @@ func (c *companion) input(w http.ResponseWriter, r *http.Request) {
 	c.mu.Unlock()
 }
 
+func (c *companion) status(w http.ResponseWriter, r *http.Request) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	w.Header().Set("Cache-Control", "no-store")
+	if c.inputAuthorized(w, r) {
+		w.WriteHeader(http.StatusNoContent)
+	}
+}
+
 func (c *companion) upgrade(w http.ResponseWriter, r *http.Request) *inputSession {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -132,23 +149,30 @@ func (c *companion) upgrade(w http.ResponseWriter, r *http.Request) *inputSessio
 		http.Error(w, "companion stopping", http.StatusServiceUnavailable)
 		return nil
 	}
-	auth := r.Header.Values("Authorization")
-	if len(auth) != 1 || !validBearer(auth[0], c.token) {
-		w.Header().Set("WWW-Authenticate", "Bearer")
-		http.Error(w, "valid bearer token required", http.StatusUnauthorized)
+	if !c.inputAuthorized(w, r) {
 		return nil
 	}
 	if c.active != nil {
 		http.Error(w, "input client already connected", http.StatusConflict)
 		return nil
 	}
-	upgrader := websocket.Upgrader{HandshakeTimeout: writeTimeout}
+	upgrader := websocket.Upgrader{HandshakeTimeout: writeTimeout, CheckOrigin: inputOriginAllowed}
 	conn, err := upgrader.Upgrade(w, r, http.Header{"X-Nullptr-Keyboard": {"1"}})
 	if err != nil {
 		return nil
 	}
 	c.active = &inputSession{conn: conn, done: make(chan struct{})}
 	return c.active
+}
+
+func (c *companion) inputAuthorized(w http.ResponseWriter, r *http.Request) bool {
+	auth := r.Header.Values("Authorization")
+	if len(auth) == 1 && validBearer(auth[0], c.token) {
+		return true
+	}
+	w.Header().Set("WWW-Authenticate", "Bearer")
+	http.Error(w, "valid bearer token required", http.StatusUnauthorized)
+	return false
 }
 
 func validBearer(header, token string) bool {
