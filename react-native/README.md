@@ -13,4 +13,4 @@ cd android
 adb install -r app/build/outputs/apk/debug/app-debug.apk
 ```
 
-The debug APK includes the JavaScript bundle and runs without Metro. The React Native app builds against the Kotlin transport in `../android` and uses the same companion. It installs alongside the Kotlin app and stores its pairing and settings separately. Once installed, open the React Native app and use the companion's pairing code or QR.
+The debug APK includes the JavaScript bundle and runs without Metro. The React Native app builds against the Kotlin transport in `../android` and uses the same companion. It installs alongside the Kotlin app and stores its pairing and settings separately. Open **nullptr RN trackpad** and use the companion's pairing code or QR.
