@@ -83,74 +83,84 @@ class TrackpadModule(private val context: ReactApplicationContext) :
     }
 
     @ReactMethod
-    fun pair(rawAddress: String, rawCode: String, promise: Promise) = UiThreadUtil.runOnUiThread {
-        val address = TailnetAddress.parse(rawAddress)
-        val code = rawCode.trim()
-        if (address == null || !CODE.matches(code)) {
-            promise.reject("INVALID_PAIRING", "Enter a Tailscale IPv4 address and the 12-character pairing code.")
-            return@runOnUiThread
-        }
-        connection.pair(address, code) { result ->
-            result.onSuccess { computer ->
-                prefs.edit()
-                    .putString("address", computer.address.toString())
-                    .putString("token", computer.token)
-                    .apply()
-                promise.resolve(computer.address.toString())
-            }.onFailure {
-                promise.reject("PAIRING_FAILED", it.message ?: "Could not pair with the computer.")
+    fun pair(rawAddress: String, rawCode: String, promise: Promise) {
+        UiThreadUtil.runOnUiThread {
+            val address = TailnetAddress.parse(rawAddress)
+            val code = rawCode.trim()
+            if (address == null || !CODE.matches(code)) {
+                promise.reject("INVALID_PAIRING", "Enter a Tailscale IPv4 address and the 12-character pairing code.")
+                return@runOnUiThread
+            }
+            connection.pair(address, code) { result ->
+                result.onSuccess { computer ->
+                    prefs.edit()
+                        .putString("address", computer.address.toString())
+                        .putString("token", computer.token)
+                        .apply()
+                    promise.resolve(computer.address.toString())
+                }.onFailure {
+                    promise.reject("PAIRING_FAILED", it.message ?: "Could not pair with the computer.")
+                }
             }
         }
     }
 
     @ReactMethod
-    fun scan(promise: Promise) = UiThreadUtil.runOnUiThread {
-        val activity = context.currentActivity
-        if (activity == null || scanPromise != null) {
-            promise.reject("SCAN_UNAVAILABLE", "Could not open the QR scanner.")
-            return@runOnUiThread
-        }
-        val options = ScanOptions()
-            .setDesiredBarcodeFormats(ScanOptions.QR_CODE)
-            .setPrompt("Scan the QR code printed by the companion")
-            .setBeepEnabled(false)
-        scanPromise = promise
-        runCatching { activity.startActivityForResult(scanContract.createIntent(activity, options), SCAN_REQUEST) }
-            .onFailure {
-                scanPromise = null
+    fun scan(promise: Promise) {
+        UiThreadUtil.runOnUiThread {
+            val activity = context.currentActivity
+            if (activity == null || scanPromise != null) {
                 promise.reject("SCAN_UNAVAILABLE", "Could not open the QR scanner.")
+                return@runOnUiThread
             }
-    }
-
-    @ReactMethod
-    fun setConnectionEnabled(enabled: Boolean) = UiThreadUtil.runOnUiThread {
-        if (wantsConnection == enabled) return@runOnUiThread
-        wantsConnection = enabled
-        if (enabled && context.lifecycleState == LifecycleState.RESUMED) {
-            onHostResume()
-        } else if (!enabled) {
-            connection.stop()
+            val options = ScanOptions()
+                .setDesiredBarcodeFormats(ScanOptions.QR_CODE)
+                .setPrompt("Scan the QR code printed by the companion")
+                .setBeepEnabled(false)
+            scanPromise = promise
+            runCatching { activity.startActivityForResult(scanContract.createIntent(activity, options), SCAN_REQUEST) }
+                .onFailure {
+                    scanPromise = null
+                    promise.reject("SCAN_UNAVAILABLE", "Could not open the QR scanner.")
+                }
         }
     }
 
     @ReactMethod
-    fun sendDelta(type: String, dx: Int, dy: Int) = UiThreadUtil.runOnUiThread {
-        val event = when (type) {
-            "move" -> InputEvent.Move(dx.coerceIn(-500, 500), dy.coerceIn(-500, 500))
-            "scroll" -> InputEvent.Scroll(dx.coerceIn(-20, 20), dy.coerceIn(-20, 20))
-            else -> return@runOnUiThread
+    fun setConnectionEnabled(enabled: Boolean) {
+        UiThreadUtil.runOnUiThread {
+            if (wantsConnection == enabled) return@runOnUiThread
+            wantsConnection = enabled
+            if (enabled && context.lifecycleState == LifecycleState.RESUMED) {
+                onHostResume()
+            } else if (!enabled) {
+                connection.stop()
+            }
         }
-        connection.send(event)
     }
 
     @ReactMethod
-    fun sendButton(button: String, down: Boolean) = UiThreadUtil.runOnUiThread {
-        val mouseButton = when (button) {
-            "left" -> MouseButton.LEFT
-            "right" -> MouseButton.RIGHT
-            else -> return@runOnUiThread
+    fun sendDelta(type: String, dx: Int, dy: Int) {
+        UiThreadUtil.runOnUiThread {
+            val event = when (type) {
+                "move" -> InputEvent.Move(dx.coerceIn(-500, 500), dy.coerceIn(-500, 500))
+                "scroll" -> InputEvent.Scroll(dx.coerceIn(-20, 20), dy.coerceIn(-20, 20))
+                else -> return@runOnUiThread
+            }
+            connection.send(event)
         }
-        connection.send(InputEvent.Button(mouseButton, down))
+    }
+
+    @ReactMethod
+    fun sendButton(button: String, down: Boolean) {
+        UiThreadUtil.runOnUiThread {
+            val mouseButton = when (button) {
+                "left" -> MouseButton.LEFT
+                "right" -> MouseButton.RIGHT
+                else -> return@runOnUiThread
+            }
+            connection.send(InputEvent.Button(mouseButton, down))
+        }
     }
 
     @ReactMethod
