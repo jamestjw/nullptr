@@ -32,6 +32,22 @@ mkdir -p companion/build
 
 The companion currently supports Linux desktops running X11. A future macOS companion can reuse the Android app and its pairing and input protocol.
 
+## Start the companion at login
+
+On Fedora x86-64, make sure Tailscale, `curl`, and `jq` are installed. Run the installer from your X11 desktop session as your regular user:
+
+```sh
+bash install-companion.sh
+```
+
+The installer verifies the latest stable companion archive against the GitHub release checksum. It installs the binary in `~/.local/bin` and registers a systemd user service. It starts the service now if your phone is already paired and the port is free. An XDG autostart entry starts it on subsequent desktop logins. Fedora's default i3 setup runs these entries through `dex-autostart`.
+
+Rerun the installer to update. Your phone's pairing and firewall settings stay in place. If you started the old companion in a terminal, stop it with Ctrl+C, then run `systemctl --user start nullptr-companion.service`.
+
+For a fresh pairing, stop the service and run `~/.local/bin/nullptr-companion --pair` in your X11 terminal. Scan the QR code or enter the printed details. Press Ctrl+C after pairing, then start the service again.
+
+Check the service with `systemctl --user status nullptr-companion.service`. Read errors with `journalctl --user -u nullptr-companion.service`.
+
 ## Publish a release
 
 GitHub Actions builds both apps for pushes to `main` and pull requests. Download the debug APK and Linux companion from the workflow run's **Artifacts** section. Use the release APK for regular updates. CI debug APKs can use a different signing key on each run.
