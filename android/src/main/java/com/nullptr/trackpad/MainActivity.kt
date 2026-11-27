@@ -17,8 +17,10 @@ import android.widget.EditText
 import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.SeekBar
+import android.widget.Switch
 import android.widget.TextView
 import androidx.activity.ComponentActivity
+import androidx.activity.OnBackPressedCallback
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
@@ -26,6 +28,8 @@ import com.journeyapps.barcodescanner.ScanContract
 import com.journeyapps.barcodescanner.ScanOptions
 
 class MainActivity : ComponentActivity() {
+    private enum class Screen { PAIRING, TRACKPAD, SETTINGS }
+
     private val backgroundColor = Color.rgb(17, 22, 28)
     private val accent = Color.rgb(168, 233, 202)
     private val textColor = Color.rgb(236, 243, 249)
@@ -42,8 +46,11 @@ class MainActivity : ComponentActivity() {
     private lateinit var scan: Button
     private var cancel: Button? = null
     private var paired: PairedComputer? = null
-    private var showingPair = false
+    private var screen = Screen.PAIRING
     private var foregroundActivity = false
+    private val settingsBack = object : OnBackPressedCallback(false) {
+        override fun handleOnBackPressed() = showTrackpad()
+    }
     private val scanPairing = registerForActivityResult(ScanContract()) { result ->
         result.contents?.let(::readPairingQr)
     }
@@ -53,12 +60,16 @@ class MainActivity : ComponentActivity() {
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         WindowCompat.setDecorFitsSystemWindows(window, false)
         connection = TrackpadConnection(::renderConnection)
+        onBackPressedDispatcher.addCallback(this, settingsBack)
         val address = TailnetAddress.parse(prefs.getString("address", "").orEmpty())
         val token = prefs.getString("token", "").orEmpty()
         if (address != null && token.isNotBlank()) paired = PairedComputer(address, token)
-        if (paired == null || savedInstanceState?.getBoolean("showingPair") == true) {
+        val savedScreen = savedInstanceState?.getString("screen")
+        if (paired == null || savedScreen == Screen.PAIRING.name) {
             showPairing()
             addressField.setText(savedInstanceState?.getString("address") ?: paired?.address?.toString())
+        } else if (savedScreen == Screen.SETTINGS.name) {
+            showSettings()
         } else {
             showTrackpad()
         }
@@ -67,7 +78,7 @@ class MainActivity : ComponentActivity() {
     override fun onStart() {
         super.onStart()
         foregroundActivity = true
-        if (!showingPair) paired?.let(connection::start)
+        if (screen != Screen.PAIRING) paired?.let(connection::start)
     }
 
     override fun onStop() {
@@ -82,8 +93,8 @@ class MainActivity : ComponentActivity() {
     }
 
     override fun onSaveInstanceState(outState: Bundle) {
-        outState.putBoolean("showingPair", showingPair)
-        if (showingPair) outState.putString("address", addressField.text.toString())
+        outState.putString("screen", screen.name)
+        if (screen == Screen.PAIRING) outState.putString("address", addressField.text.toString())
         super.onSaveInstanceState(outState)
     }
 
@@ -105,7 +116,7 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun showPairing() {
-        showingPair = true
+        screen = Screen.PAIRING
         connection.stop()
         buildRoot()
         val scroll = ScrollView(this).apply { isFillViewport = true }
@@ -194,7 +205,8 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun showTrackpad() {
-        showingPair = false
+        screen = Screen.TRACKPAD
+        settingsBack.isEnabled = false
         buildRoot()
         val header = LinearLayout(this).apply { gravity = Gravity.CENTER_VERTICAL }
         val heading = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
@@ -206,24 +218,40 @@ class MainActivity : ComponentActivity() {
             showPairing()
             addressField.setText(lastAddress)
         })
+        header.addView(button("Settings", action = ::showSettings), LinearLayout.LayoutParams(-2, -2).apply {
+            marginStart = dp(8)
+        })
         root.addView(header)
         status = label("", 14, muted).apply { accessibilityLiveRegion = View.ACCESSIBILITY_LIVE_REGION_POLITE }
         root.addView(status, spaced(top = 6))
         pad = TouchpadView(this, connection::send)
-        val savedSensitivity = prefs.getInt("sensitivity", 30).coerceIn(0, 100)
-        pad.sensitivity = sensitivity(savedSensitivity)
+        pad.sensitivity = 0.4f + savedSensitivity() / 50f
+        pad.invertScroll = prefs.getBoolean("invertScroll", false)
         root.addView(pad, LinearLayout.LayoutParams(-1, 0, 1f).apply { topMargin = dp(14) })
+        root.addView(label("Tap to click · Hold to drag · Two fingers to scroll or right-click", 13, muted), spaced(top = 10))
+        renderConnection(connection.status)
+    }
 
-        val settings = LinearLayout(this).apply { gravity = Gravity.CENTER_VERTICAL }
-        val sensitivityValue = label(sensitivityLabel(savedSensitivity), 14, textColor)
-        settings.addView(sensitivityValue)
+    private fun showSettings() {
+        if (::pad.isInitialized) pad.reset()
+        screen = Screen.SETTINGS
+        settingsBack.isEnabled = true
+        buildRoot()
+        val scroll = ScrollView(this)
+        val settings = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+        root.addView(scroll, LinearLayout.LayoutParams(-1, -1))
+        scroll.addView(settings)
+        settings.addView(label("NULLPTR", 12, accent, bold = true))
+        settings.addView(label("Settings", 28, textColor, bold = true), spaced(top = 6))
+        val savedSensitivity = savedSensitivity()
+        val sensitivityValue = label(sensitivityLabel(savedSensitivity), 16, textColor)
+        settings.addView(sensitivityValue, spaced(top = 24))
         val slider = SeekBar(this).apply {
             max = 100
             progress = savedSensitivity
             contentDescription = "Pointer sensitivity"
             setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
                 override fun onProgressChanged(seekBar: SeekBar, progress: Int, fromUser: Boolean) {
-                    pad.sensitivity = sensitivity(progress)
                     sensitivityValue.text = sensitivityLabel(progress)
                     if (fromUser) prefs.edit().putInt("sensitivity", progress).apply()
                 }
@@ -231,14 +259,23 @@ class MainActivity : ComponentActivity() {
                 override fun onStopTrackingTouch(seekBar: SeekBar) = Unit
             })
         }
-        settings.addView(slider, LinearLayout.LayoutParams(0, -2, 1f).apply { marginStart = dp(12) })
-        root.addView(settings, spaced(top = 10))
-        root.addView(label("Tap to click · Hold to drag · Two fingers to scroll or right-click", 13, muted))
-        renderConnection(TrackpadConnection.Status.IDLE)
+        settings.addView(slider, spaced(top = 8))
+        settings.addView(Switch(this).apply {
+            text = "Invert scroll"
+            textSize = 16f
+            setTextColor(textColor)
+            minimumHeight = dp(48)
+            isChecked = prefs.getBoolean("invertScroll", false)
+            setOnCheckedChangeListener { _, checked ->
+                prefs.edit().putBoolean("invertScroll", checked).apply()
+            }
+        }, spaced(top = 16))
+        settings.addView(label("Reverse the direction of two-finger scrolling.", 14, muted))
+        settings.addView(button("Back to trackpad", action = ::showTrackpad), spaced(top = 24))
     }
 
     private fun renderConnection(state: TrackpadConnection.Status) {
-        if (showingPair || !::pad.isInitialized) return
+        if (screen != Screen.TRACKPAD || !::pad.isInitialized) return
         val ready = state == TrackpadConnection.Status.CONNECTED
         if (pad.isEnabled && !ready) pad.reset()
         pad.isEnabled = ready
@@ -294,8 +331,8 @@ class MainActivity : ComponentActivity() {
             if (bold) typeface = Typeface.DEFAULT_BOLD
         }
 
-    private fun sensitivity(progress: Int) = 0.4f + progress / 50f
-    private fun sensitivityLabel(progress: Int) = "Sensitivity · ${40 + progress * 2}%"
+    private fun savedSensitivity() = prefs.getInt("sensitivity", 30).coerceIn(0, 100)
+    private fun sensitivityLabel(progress: Int) = "Pointer sensitivity · ${40 + progress * 2}%"
     private fun dp(value: Int) = (value * resources.displayMetrics.density + 0.5f).toInt()
     private fun spaced(top: Int) = LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(top) }
 }

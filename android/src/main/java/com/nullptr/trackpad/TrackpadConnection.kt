@@ -76,7 +76,8 @@ class TrackpadConnection(private val onStatus: (Status) -> Unit) {
     private var computer: PairedComputer? = null
     private var socket: WebSocket? = null
     private var pairing: Call? = null
-    private var status = Status.IDLE
+    var status = Status.IDLE
+        private set
     private var retryDelay = 500L
     private val retry = Runnable { open() }
 

@@ -11,6 +11,8 @@
 4. Open **nullptr trackpad** on the phone. Tap **Scan pairing QR**, or enter the Tailscale address and pairing code printed by the companion.
 5. Keep the companion running while you use the trackpad. Tap to click, or hold then slide to drag. Slide two fingers to scroll, or tap with two fingers to right-click.
 
+Open **Settings** on the trackpad screen to adjust pointer sensitivity or invert two-finger scrolling.
+
 The companion listens on its Tailscale IPv4 address on TCP port `47822` and relies on Tailscale to encrypt traffic. If the phone cannot connect, check that your tailnet policy allows the phone to reach that port. Pair again by restarting the companion with `--pair`.
 
 ## Build both apps
