@@ -1,0 +1,5 @@
+node_modules/
+.cxx/
+android/.idea/
+*.hprof
+!android/gradle/wrapper/gradle-wrapper.jar

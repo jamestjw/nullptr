@@ -1,0 +1,29 @@
+{
+  "name": "nullptr-trackpad",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "android": "react-native run-android --no-packager",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@react-native-community/slider": "5.1.2",
+    "react": "19.2.3",
+    "react-native": "0.86.3",
+    "react-native-safe-area-context": "5.7.0"
+  },
+  "devDependencies": {
+    "@babel/core": "^7.25.2",
+    "@babel/runtime": "^7.25.0",
+    "@react-native-community/cli": "20.1.0",
+    "@react-native-community/cli-platform-android": "20.1.0",
+    "@react-native/babel-preset": "0.86.3",
+    "@react-native/metro-config": "0.86.3",
+    "@react-native/typescript-config": "0.86.3",
+    "@types/react": "^19.2.0",
+    "typescript": "^5.8.3"
+  },
+  "engines": {
+    "node": "^22.13.0 || ^24.3.0 || >=25.0.0"
+  }
+}
