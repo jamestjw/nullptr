@@ -12,6 +12,7 @@ import (
 	"os"
 	"os/exec"
 	"os/signal"
+	"runtime"
 	"strings"
 	"syscall"
 	"time"
@@ -103,7 +104,13 @@ func run(listen string, port uint16, forcePair bool) error {
 func tailscaleAddress(requested string, port uint16) (netip.AddrPort, error) {
 	deadline, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	output, err := exec.CommandContext(deadline, "tailscale", "ip", "-4").Output()
+	cli := "tailscale"
+	if runtime.GOOS == "darwin" {
+		if _, err := exec.LookPath(cli); errors.Is(err, exec.ErrNotFound) {
+			cli = "/Applications/Tailscale.app/Contents/MacOS/Tailscale"
+		}
+	}
+	output, err := exec.CommandContext(deadline, cli, "ip", "-4").Output()
 	if err != nil {
 		return netip.AddrPort{}, fmt.Errorf("detect local Tailscale IPv4: %w", err)
 	}

@@ -82,7 +82,16 @@ jobs:
           if-no-files-found: error
 
   companion:
-    runs-on: ubuntu-24.04
+    strategy:
+      matrix:
+        include:
+          - runner: ubuntu-24.04
+            platform: linux-x86_64
+          - runner: macos-15
+            platform: macos-arm64
+          - runner: macos-15-intel
+            platform: macos-x86_64
+    runs-on: ${{ matrix.runner }}
     steps:
       - uses: actions/checkout@v7.0.1
       - uses: actions/setup-go@v7.1.0
@@ -90,29 +99,36 @@ jobs:
           go-version-file: companion/go.mod
           cache-dependency-path: companion/go.sum
       - name: Install X11 development libraries
+        if: runner.os == 'Linux'
         run: |
           sudo apt-get update
           sudo apt-get install -y libx11-dev libxtst-dev libxkbcommon-dev
       - name: Test and build companion
         working-directory: companion
+        env:
+          CGO_ENABLED: '1'
+          MACOSX_DEPLOYMENT_TARGET: '13.0'
         run: |
           go test -race ./...
           go vet ./...
           mkdir -p build
           go build -trimpath -o build/nullptr-companion .
-      - name: Package Linux companion
+          ./build/nullptr-companion --help
+      - name: Package companion
         shell: bash
+        env:
+          PLATFORM: ${{ matrix.platform }}
         run: |
           version="${GITHUB_SHA::7}"
           if [[ "$GITHUB_REF_TYPE" == tag ]]; then
             version="$GITHUB_REF_NAME"
           fi
           mkdir -p dist
-          tar -C companion/build -czf "dist/nullptr-companion-linux-x86_64-${version}.tar.gz" nullptr-companion
+          tar -C companion/build -czf "dist/nullptr-companion-${PLATFORM}-${version}.tar.gz" nullptr-companion
       - uses: actions/upload-artifact@v7.0.2
         with:
-          name: companion-linux-x86_64
-          path: dist/nullptr-companion-linux-x86_64-*.tar.gz
+          name: companion-${{ matrix.platform }}
+          path: dist/nullptr-companion-${{ matrix.platform }}-*.tar.gz
           if-no-files-found: error
 
   release:
@@ -133,7 +149,11 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           apk="nullptr-android-${GITHUB_REF_NAME}.apk"
-          companion="nullptr-companion-linux-x86_64-${GITHUB_REF_NAME}.tar.gz"
-          sha256sum "$apk" "$companion" > SHA256SUMS.txt
+          companions=(
+            "nullptr-companion-linux-x86_64-${GITHUB_REF_NAME}.tar.gz"
+            "nullptr-companion-macos-arm64-${GITHUB_REF_NAME}.tar.gz"
+            "nullptr-companion-macos-x86_64-${GITHUB_REF_NAME}.tar.gz"
+          )
+          sha256sum "$apk" "${companions[@]}" > SHA256SUMS.txt
           gh release create "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" \
-            --verify-tag --generate-notes "$apk" "$companion" SHA256SUMS.txt
+            --verify-tag --generate-notes "$apk" "${companions[@]}" SHA256SUMS.txt

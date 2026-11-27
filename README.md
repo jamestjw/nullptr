@@ -1,17 +1,25 @@
-# Use your Android phone as a Fedora trackpad
+# Use your Android phone as a trackpad for Linux or macOS
 
 1. Connect your phone and computer to the same Tailscale network.
 2. Install the Android APK from [GitHub Releases](https://github.com/jamestjw/nullptr/releases/latest). If you built the debug APK instead, install it over USB with `adb install -r android/build/outputs/apk/debug/android-debug.apk`.
-3. Download and extract the Linux companion archive, then run `./nullptr-companion` from your X11 desktop session. If you built the companion yourself, run `./companion/build/nullptr-companion`.
+3. Download and extract the companion archive for your computer. On Linux, run `./nullptr-companion` in an X11 desktop session. On macOS, run it from Terminal in your logged-in desktop session. If you built the companion yourself, run `./companion/build/nullptr-companion`.
 4. Open **nullptr trackpad** and tap **Scan pairing QR**. You can also enter the address and pairing code shown in the terminal.
 
 Keep the companion running while you use the trackpad. Tap to click. Hold and slide to drag. Slide two fingers to scroll, or tap with two fingers to right-click. Open **Settings** to adjust pointer sensitivity or reverse scrolling.
 
 Tap **Keyboard** to type into the focused desktop window. If your phone keyboard shows a word in its suggestion bar, press Space or pick the suggestion to send it. Swipe the row above the keyboard for Backspace, Enter, Tab, Escape, and the arrow keys.
 
-The companion uses the active X11 layout. It sends characters you can type with an unmodified key or Shift. If **Keyboard** is disabled while the trackpad is connected, update the companion.
+On X11, the companion sends characters available in the active layout with an unmodified key or Shift. On macOS it sends Unicode text to the focused app; apps that only accept physical key codes may not handle that text. If **Keyboard** is disabled while the trackpad is connected, update the companion.
 
-The companion listens on TCP port `47822` at its Tailscale IPv4 address. Tailscale encrypts the connection. If the phone cannot connect, check that your tailnet policy and Fedora firewall allow the phone to reach that port. To show a new pairing code for a companion you start by hand, restart it with `--pair`.
+The companion listens on TCP port `47822` at its Tailscale IPv4 address. Tailscale encrypts the connection. If the phone cannot connect, check that your tailnet policy and desktop firewall allow the phone to reach that port. To show a new pairing code for a companion you start by hand, restart it with `--pair`.
+
+### macOS setup
+
+- Use macOS 13 or later. Choose `macos-arm64` for Apple Silicon or `macos-x86_64` for Intel.
+- Release binaries are not notarized. If Gatekeeper blocks the downloaded companion, macOS shows **Open Anyway** under **System Settings → Privacy & Security** after the first launch attempt. You can also build the companion from source.
+- Start Tailscale before running the companion. The companion uses `tailscale` on your `PATH` or the CLI inside `/Applications/Tailscale.app`.
+- The first run requests permission to post input. Open **System Settings → Privacy & Security → Accessibility**, enable the terminal app or `nullptr-companion` shown in the list, and run the companion again.
+- The pairing credential is saved in `~/Library/Application Support/nullptr/token`. Run the companion from Terminal each time you want to use it.
 
 ## Build both apps
 
@@ -21,16 +29,14 @@ Use JDK 17 or 21. Set `ANDROID_HOME` to an Android SDK with platform 35 and buil
 ./gradlew :android:assembleDebug
 ```
 
-On Fedora, install Go 1.25 or later, GCC, pkg-config, `libX11-devel`, `libXtst-devel`, and `libxkbcommon-devel`. From the project root, run:
+Install Go 1.25 or later. On Fedora, install GCC, pkg-config, `libX11-devel`, `libXtst-devel`, and `libxkbcommon-devel`. On macOS, install the Xcode Command Line Tools (`xcode-select --install`). From the project root, run:
 
 ```sh
 mkdir -p companion/build
-(cd companion && go build -o build/nullptr-companion .)
+(cd companion && CGO_ENABLED=1 go build -o build/nullptr-companion .)
 ```
 
-The companion supports Linux desktops running X11. A macOS companion could use the same Android app and protocol.
-
-## Start the companion at login
+## Start the companion at login on Fedora
 
 On Fedora x86-64, install Tailscale, `curl`, and `jq`. Run the installer from your X11 desktop session without `sudo`:
 
@@ -50,7 +56,7 @@ Run `./uninstall-companion.sh` to stop the service and remove the binary, servic
 
 ## Publish a release
 
-GitHub Actions builds the Android app and Linux companion on pushes to `main` and on pull requests. Download the debug APK and companion from the run's **Artifacts** section. Use the release APK for updates because GitHub Actions can sign debug APKs with a different key on each run.
+GitHub Actions builds the Android app and the Linux and macOS companions on pushes to `main` and on pull requests. Download the debug APK and companion from the run's **Artifacts** section. Use the release APK for updates because GitHub Actions can sign debug APKs with a different key on each run.
 
 To publish a release, push a new `vMAJOR.MINOR.PATCH` tag from `main`. For example:
 
@@ -59,7 +65,7 @@ git tag v0.1.0
 git push origin v0.1.0
 ```
 
-The workflow attaches the signed Android APK, the Linux x86-64 companion archive, and `SHA256SUMS.txt` to the GitHub release. Increase the version tag for each release so Android accepts the APK as an update.
+The workflow attaches the signed Android APK, the Linux x86-64 and both macOS companion archives, and `SHA256SUMS.txt` to the GitHub release. Increase the version tag for each release so Android accepts the APK as an update.
 
 If you installed a debug APK, uninstall it before installing the first release APK, then pair again. Later release APKs install over the previous release and keep your pairing.
 
