@@ -22,14 +22,15 @@ module.exports = function withAndroidBuild(config) {
   config = withAppBuildGradle(config, config => {
     const { contents } = config.modResults;
     const react = /^react \{$/m;
+    const debugSigning = /^    signingConfigs \{\n        debug \{\n[^}]+        \}\n    \}\n/m;
     const releaseSigning = /(^[ \t]*release \{\n)(?:[ \t]*\/\/[^\n]*\n)*[ \t]*signingConfig signingConfigs\.debug$/m;
-    if (!react.test(contents) || !releaseSigning.test(contents)) {
+    if (!react.test(contents) || !debugSigning.test(contents) || !releaseSigning.test(contents)) {
       throw new Error('The Expo Android template changed. Review the bundle and release signing configuration.');
     }
     config.modResults.contents = contents
       .replace(react, 'react {\n    debuggableVariants = []')
-      .replace(releaseSigning, '$1            signingConfig null')
-      .replace("storeFile file('debug.keystore')", 'storeFile new File(System.getProperty("user.home"), ".android/debug.keystore")');
+      .replace(debugSigning, '')
+      .replace(releaseSigning, '$1            signingConfig null');
     return config;
   });
 
