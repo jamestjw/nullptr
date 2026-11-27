@@ -6,6 +6,7 @@ import {
   AppState,
   BackHandler,
   Keyboard,
+  KeyboardAvoidingView,
   Modal,
   Pressable,
   ScrollView,
@@ -20,6 +21,8 @@ import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
 import Touchpad from './src/Touchpad';
 import { connect, pair, parsePairingQr } from './src/connection';
 import type { Computer, ConnectionStatus } from './src/connection';
+import { keyboardIssues, keyboardRecords, specialKeys } from './src/keyboard';
+import type { KeyboardIssue, KeyboardKey } from './src/keyboard';
 import { defaultSettings, load, saveComputer, saveSettings } from './src/storage';
 import type { Settings } from './src/storage';
 
@@ -42,15 +45,18 @@ function Button({
   onPress,
   primary = false,
   disabled = false,
+  accessibilityLabel = label,
 }: {
   label: string;
   onPress: () => void;
   primary?: boolean;
   disabled?: boolean;
+  accessibilityLabel?: string;
 }) {
   return (
     <Pressable
       accessibilityRole="button"
+      accessibilityLabel={accessibilityLabel}
       accessibilityState={{ disabled }}
       disabled={disabled}
       onPress={onPress}
@@ -247,11 +253,28 @@ export default function App() {
   const [computer, setComputer] = useState<Computer | null>(null);
   const [settings, setSettings] = useState(defaultSettings);
   const [settingsError, setSettingsError] = useState(false);
-  const [status, setStatus] = useState<ConnectionStatus>('IDLE');
+  const [status, setStatus] = useState<ConnectionStatus>({ kind: 'IDLE' });
+  const [keyboardOpen, setKeyboardOpen] = useState(false);
+  const [draft, setDraft] = useState('');
+  const [keyboardNotice, setKeyboardNotice] = useState<string | null>(null);
   const connection = useRef<ReturnType<typeof connect> | null>(null);
   const settingsWrites = useRef(Promise.resolve());
   const address = computer?.address ?? null;
   const wantsConnection = screen === 'trackpad' || screen === 'settings';
+  const keyboardReady = status.kind === 'CONNECTED' && status.keyboard;
+
+  function sendDraft() {
+    let end = 0;
+    for (const record of keyboardRecords(draft)) {
+      if (!connection.current?.send(record.event)) {
+        setDraft(draft.slice(end));
+        setKeyboardNotice('The remaining text was kept. Reconnect and tap Send to try again.');
+        return;
+      }
+      end = record.end;
+    }
+    setDraft('');
+  }
 
   useEffect(() => {
     let active = true;
@@ -273,11 +296,13 @@ export default function App() {
     const paired = computer;
     function update(state: string | null) {
       if (state === 'active') {
-        connection.current ??= connect(paired, setStatus);
+        connection.current ??= connect(paired, setStatus, (issue: KeyboardIssue) => {
+          setKeyboardNotice(keyboardIssues[issue]);
+        });
       } else {
         connection.current?.stop();
         connection.current = null;
-        setStatus('IDLE');
+        setStatus({ kind: 'IDLE' });
       }
     }
     const subscription = AppState.addEventListener('change', update);
@@ -288,6 +313,17 @@ export default function App() {
       connection.current = null;
     };
   }, [computer, wantsConnection]);
+
+  useEffect(() => {
+    if (screen === 'trackpad' && keyboardReady) return;
+    setKeyboardOpen(false);
+  }, [screen, keyboardReady]);
+
+  useEffect(() => {
+    if (!keyboardNotice) return;
+    const timeout = setTimeout(() => setKeyboardNotice(null), 5000);
+    return () => clearTimeout(timeout);
+  }, [keyboardNotice]);
 
   useEffect(() => {
     if (!wantsConnection) return;
@@ -310,10 +346,10 @@ export default function App() {
     return () => back.remove();
   }, [screen]);
 
-  const statusText: Record<ConnectionStatus, string> = {
+  const statusText: Record<ConnectionStatus['kind'], string> = {
     IDLE: address ? `Saved computer · ${address}` : 'No computer paired',
     CONNECTING: `Connecting to ${address}…`,
-    CONNECTED: `Connected · ${address}`,
+    CONNECTED: `Connected · ${address}${keyboardReady ? '' : ' · Trackpad only'}`,
     RETRYING: 'Connection lost. Retrying…',
     UNPAIRED: 'Pairing expired or was replaced. Pair again.',
     UPDATE_REQUIRED: 'Update the companion on your computer.',
@@ -322,47 +358,89 @@ export default function App() {
   return (
     <SafeAreaProvider style={styles.root}>
       <StatusBar barStyle="light-content" />
-      <SafeAreaView style={styles.content}>
-        {settingsError && <Text style={styles.error}>Could not save trackpad settings.</Text>}
-        {screen === 'error' && <Text style={styles.error}>Could not load the saved trackpad settings.</Text>}
-        {screen === 'pairing' && (
-          <PairingScreen
-            savedAddress={address}
-            onPaired={pairedComputer => {
-              setComputer(pairedComputer);
-              setScreen('trackpad');
-            }}
-            onCancel={() => setScreen('trackpad')}
-          />
-        )}
-        {screen === 'trackpad' && (
-          <>
-            <View style={styles.row}>
-              <Heading title="Trackpad" />
-              <Button label="Pair" onPress={() => {
-                setStatus('IDLE');
-                setScreen('pairing');
-              }} />
-              <Button label="Settings" onPress={() => setScreen('settings')} />
-            </View>
-            <Text accessibilityLiveRegion="polite" style={[styles.muted, status === 'CONNECTED' && styles.connected]}>
-              {statusText[status]}
-            </Text>
-            <View style={styles.pad}>
-              <Touchpad
-                enabled={status === 'CONNECTED'}
-                sensitivity={0.4 + settings.sensitivity / 50}
-                invertScroll={settings.invertScroll}
-                send={event => connection.current?.send(event)}
-              />
-            </View>
-            <Text style={styles.hint}>Tap to click · Hold to drag · Two fingers to scroll or right-click</Text>
-          </>
-        )}
-        {screen === 'settings' && (
-          <SettingsScreen settings={settings} onChange={setSettings} onBack={() => setScreen('trackpad')} />
-        )}
-      </SafeAreaView>
+      <KeyboardAvoidingView style={styles.root} behavior="padding">
+        <SafeAreaView style={styles.content}>
+          {settingsError && <Text style={styles.error}>Could not save trackpad settings.</Text>}
+          {screen === 'error' && <Text style={styles.error}>Could not load the saved trackpad settings.</Text>}
+          {screen === 'pairing' && (
+            <PairingScreen
+              savedAddress={address}
+              onPaired={pairedComputer => {
+                setComputer(pairedComputer);
+                setScreen('trackpad');
+              }}
+              onCancel={() => setScreen('trackpad')}
+            />
+          )}
+          {screen === 'trackpad' && (
+            <>
+              <View style={styles.row}>
+                <Heading title="Trackpad" />
+                <Button label="Pair" onPress={() => {
+                  setStatus({ kind: 'IDLE' });
+                  setScreen('pairing');
+                }} />
+                <Button label="Settings" onPress={() => setScreen('settings')} />
+              </View>
+              <Text accessibilityLiveRegion="polite" style={[styles.muted, status.kind === 'CONNECTED' && styles.connected]}>
+                {statusText[status.kind]}
+              </Text>
+              <View style={styles.pad}>
+                <Touchpad
+                  enabled={status.kind === 'CONNECTED'}
+                  sensitivity={0.4 + settings.sensitivity / 50}
+                  invertScroll={settings.invertScroll}
+                  send={event => connection.current?.send(event)}
+                />
+              </View>
+              <Text style={styles.hint}>Tap to click · Hold to drag · Two fingers to scroll or right-click</Text>
+              <View style={styles.row}>
+                <Button
+                  label={keyboardOpen ? 'Hide keyboard' : 'Keyboard'}
+                  disabled={!keyboardReady}
+                  onPress={() => setKeyboardOpen(!keyboardOpen)}
+                />
+                {keyboardReady && (
+                  <ScrollView
+                    horizontal
+                    accessibilityLabel="Special keys"
+                    keyboardShouldPersistTaps="always"
+                    contentContainerStyle={styles.row}
+                  >
+                    {(Object.keys(specialKeys) as KeyboardKey[]).map(key => (
+                      <Button
+                        key={key}
+                        label={specialKeys[key]}
+                        accessibilityLabel={key}
+                        onPress={() => connection.current?.send({ type: 'keyTap', key })}
+                      />
+                    ))}
+                  </ScrollView>
+                )}
+              </View>
+              {keyboardOpen && keyboardReady && (
+                <View style={styles.row}>
+                  <TextInput
+                    accessibilityLabel="Text to send to the desktop"
+                    autoFocus
+                    multiline
+                    placeholder="Type text to send"
+                    placeholderTextColor={palette.muted}
+                    style={[styles.input, styles.draft]}
+                    value={draft}
+                    onChangeText={setDraft}
+                  />
+                  <Button label="Send" primary disabled={!draft} onPress={sendDraft} />
+                </View>
+              )}
+              {keyboardNotice && <Text accessibilityLiveRegion="polite" style={styles.notice}>{keyboardNotice}</Text>}
+            </>
+          )}
+          {screen === 'settings' && (
+            <SettingsScreen settings={settings} onChange={setSettings} onBack={() => setScreen('trackpad')} />
+          )}
+        </SafeAreaView>
+      </KeyboardAvoidingView>
     </SafeAreaProvider>
   );
 }
@@ -380,6 +458,8 @@ const styles = StyleSheet.create({
   hint: { color: palette.muted, fontSize: 13 },
   connected: { color: palette.accent },
   error: { color: palette.error },
+  notice: { color: '#ffcd8e', fontSize: 13 },
+  draft: { flex: 1, maxHeight: 100 },
   field: { gap: 4 },
   input: {
     color: palette.text,

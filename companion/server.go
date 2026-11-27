@@ -18,10 +18,11 @@ import (
 )
 
 const (
-	inputTimeout = 15 * time.Second
-	pingInterval = 5 * time.Second
-	writeTimeout = time.Second
-	nativeOrigin = "https://nullptr.invalid"
+	inputTimeout   = 15 * time.Second
+	pingInterval   = 5 * time.Second
+	writeTimeout   = time.Second
+	nativeOrigin   = "https://nullptr.invalid"
+	keyboardHeader = "X-Nullptr-Keyboard"
 )
 
 var tailnet = netip.MustParsePrefix("100.64.0.0/10")
@@ -138,6 +139,7 @@ func (c *companion) status(w http.ResponseWriter, r *http.Request) {
 	defer c.mu.Unlock()
 	w.Header().Set("Cache-Control", "no-store")
 	if c.inputAuthorized(w, r) {
+		w.Header().Set(keyboardHeader, "1")
 		w.WriteHeader(http.StatusNoContent)
 	}
 }
@@ -157,7 +159,7 @@ func (c *companion) upgrade(w http.ResponseWriter, r *http.Request) *inputSessio
 		return nil
 	}
 	upgrader := websocket.Upgrader{HandshakeTimeout: writeTimeout, CheckOrigin: inputOriginAllowed}
-	conn, err := upgrader.Upgrade(w, r, http.Header{"X-Nullptr-Keyboard": {"1"}})
+	conn, err := upgrader.Upgrade(w, r, http.Header{keyboardHeader: {"1"}})
 	if err != nil {
 		return nil
 	}

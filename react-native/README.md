@@ -23,6 +23,8 @@ Update the desktop companion to a build from the same checkout before pairing. T
 
 Open **nullptr RN trackpad** and use the companion's pairing code or QR. If you used an earlier React Native build, pair again and set your preferences again. This build uses the operating system's secure storage for the pairing credential.
 
+To type on the desktop, tap **Keyboard**, enter text, and tap **Send**. The special-key buttons send their keys immediately. If the app shows **Trackpad only**, update the companion to enable keyboard input.
+
 ## Generate the iOS project
 
 On macOS with Xcode and CocoaPods, run `npm ci`, then `npx expo prebuild --platform ios` from this directory. Open the generated `.xcworkspace` in Xcode and select your signing team. The generated iOS project and Android host use the same TypeScript app.

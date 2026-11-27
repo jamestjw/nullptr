@@ -1,8 +1,12 @@
 import { fetch } from 'expo/fetch';
 import type { InputEvent } from './Touchpad';
+import { parseKeyboardIssue } from './keyboard';
+import type { KeyboardEvent, KeyboardIssue } from './keyboard';
 
 export type Computer = { address: string; token: string };
-export type ConnectionStatus = 'IDLE' | 'CONNECTING' | 'CONNECTED' | 'RETRYING' | 'UNPAIRED' | 'UPDATE_REQUIRED';
+export type ConnectionStatus =
+  | { kind: 'CONNECTED'; keyboard: boolean }
+  | { kind: 'IDLE' | 'CONNECTING' | 'RETRYING' | 'UNPAIRED' | 'UPDATE_REQUIRED' };
 
 const nativeOrigin = 'https://nullptr.invalid';
 const codePattern = /^[0-9a-f]{12}$/i;
@@ -51,7 +55,7 @@ async function request(address: string, path: string, init: Parameters<typeof fe
     const body: unknown = init?.method === 'POST' && response.status === 200
       ? await response.json().catch(() => null)
       : null;
-    return { status: response.status, body };
+    return { status: response.status, body, keyboard: response.headers.get('X-Nullptr-Keyboard') === '1' };
   } finally {
     clearTimeout(timeout);
   }
@@ -97,40 +101,46 @@ export async function pair(rawAddress: string, rawCode: string): Promise<Compute
   }
 }
 
-export function connect(computer: Computer, onStatus: (status: ConnectionStatus) => void) {
+export function connect(
+  computer: Computer,
+  onStatus: (status: ConnectionStatus) => void,
+  onKeyboardIssue: (issue: KeyboardIssue) => void,
+) {
   const headers = { Authorization: `Bearer ${computer.token}` };
   let socket: WebSocket | undefined;
   let timer: ReturnType<typeof setTimeout> | undefined;
   let stopped = false;
   let retryDelay = 500;
+  let keyboard = false;
 
   function closeSocket() {
     const previous = socket;
     socket = undefined;
     if (!previous) return;
-    previous.onopen = previous.onclose = previous.onerror = null;
+    keyboard = false;
+    previous.onopen = previous.onclose = previous.onerror = previous.onmessage = null;
     previous.close();
   }
 
   function retry() {
     if (timer !== undefined) clearTimeout(timer);
     closeSocket();
-    onStatus('RETRYING');
+    onStatus({ kind: 'RETRYING' });
     timer = setTimeout(open, retryDelay);
     retryDelay = Math.min(retryDelay * 2, 5000);
   }
 
   async function open() {
-    onStatus('CONNECTING');
+    onStatus({ kind: 'CONNECTING' });
     try {
       const response = await request(computer.address, '/v1/status', { headers });
       if (stopped) return;
       if (response.status === 401 || response.status === 403) {
-        onStatus('UNPAIRED');
+        onStatus({ kind: 'UNPAIRED' });
         return;
       }
       if (response.status === 404) {
-        onStatus('UPDATE_REQUIRED');
+        onStatus({ kind: 'UPDATE_REQUIRED' });
         return;
       }
       if (response.status !== 204) {
@@ -146,7 +156,13 @@ export function connect(computer: Computer, onStatus: (status: ConnectionStatus)
         if (socket !== current) return;
         clearTimeout(timer);
         retryDelay = 500;
-        onStatus('CONNECTED');
+        keyboard = response.keyboard;
+        onStatus({ kind: 'CONNECTED', keyboard });
+      };
+      current.onmessage = event => {
+        if (socket !== current || !keyboard) return;
+        const issue = parseKeyboardIssue(event.data);
+        if (issue) onKeyboardIssue(issue);
       };
       current.onerror = current.onclose = () => {
         if (socket === current) retry();
@@ -158,12 +174,15 @@ export function connect(computer: Computer, onStatus: (status: ConnectionStatus)
 
   void open();
   return {
-    send(event: InputEvent) {
-      if (socket?.readyState !== WebSocket.OPEN) return;
+    send(event: InputEvent | KeyboardEvent): boolean {
+      if (socket?.readyState !== WebSocket.OPEN) return false;
+      if ((event.type === 'text' || event.type === 'keyTap') && !keyboard) return false;
       try {
         socket.send(JSON.stringify(event));
+        return true;
       } catch {
         retry();
+        return false;
       }
     },
     stop() {

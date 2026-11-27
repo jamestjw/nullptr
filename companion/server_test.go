@@ -188,6 +188,9 @@ func TestNativeClientChecksCredentialAndConnects(t *testing.T) {
 		if res.StatusCode != check.want {
 			t.Fatalf("status = %d, want %d", res.StatusCode, check.want)
 		}
+		if advertised := res.Header.Get(keyboardHeader) == "1"; advertised != (check.want == http.StatusNoContent) {
+			t.Fatalf("keyboard support advertised with status %d: %t", res.StatusCode, advertised)
+		}
 	}
 	headers := bearer(testToken)
 	headers.Set("Origin", "https://example.com")
