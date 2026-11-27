@@ -44,11 +44,11 @@ The installer verifies the latest stable companion archive against the GitHub re
 
 Rerun the installer to update. Your phone's pairing and firewall settings stay in place. If you started the old companion in a terminal, stop it with Ctrl+C, then run `systemctl --user start nullptr-companion.service`.
 
-For a fresh pairing, stop the service and run `~/.local/bin/nullptr-companion --pair` in your X11 terminal. Scan the QR code or enter the printed details. Press Ctrl+C after pairing, then start the service again.
+To revoke the current pairing without uninstalling, run `./reset-pairing.sh`. It stops the service and deletes the desktop credential immediately. Follow the printed commands to show a fresh QR code and restart the service after pairing. You don't need to clear the Android app's data.
 
 Check the service with `systemctl --user status nullptr-companion.service`. Read errors with `journalctl --user -u nullptr-companion.service`.
 
-To stop the service and remove the installed companion and its login entry, run `./uninstall-companion.sh`. The script keeps your pairing credential so you can reconnect after reinstalling.
+To stop the service and remove the installed companion and its login entry, run `./uninstall-companion.sh`. It asks whether to delete the pairing credential and keeps it by default, including when run without an interactive terminal. To choose without a prompt, pass `--purge` to delete the credential or `--keep-token` to keep it.
 
 ## Publish a release
 

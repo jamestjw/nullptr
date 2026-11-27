@@ -29,7 +29,7 @@ unit=nullptr-companion.service
 manager_env=$(systemctl --user show-environment) ||
     die 'cannot reach the systemd user manager; run this from your desktop session'
 exec 9>"$runtime_dir/nullptr-install.lock"
-flock -n 9 || die 'another nullptr installation is running'
+flock -n 9 || die 'another nullptr maintenance command is running'
 
 scratch=$(mktemp -d)
 staged=
