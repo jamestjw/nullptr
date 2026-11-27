@@ -100,22 +100,26 @@ var x11Keys = map[keyboardKey]C.KeySym{
 	downKey:      C.XK_Down,
 }
 
-func (d *x11Driver) keyboard() (C.XkbDescPtr, C.XkbStateRec) {
+func (d *x11Driver) keyboard() (C.XkbDescPtr, C.XkbStateRec, keyboardIssue) {
 	var state C.XkbStateRec
 	if C.XkbGetState(d.display, C.XkbUseCoreKbd, &state) != C.Success {
-		return nil, state
+		return nil, state, keyboardUnavailable
 	}
 	allowedLocks := C.uint(C.LockMask) | C.XkbKeysymToModifiers(d.display, C.XK_Num_Lock)
 	if state.base_mods|state.latched_mods != 0 || C.uint(state.locked_mods)&^allowedLocks != 0 {
-		return nil, state
+		return nil, state, modifiersActive
 	}
-	return C.XkbGetMap(d.display, C.XkbAllClientInfoMask, C.XkbUseCoreKbd), state
+	keymap := C.XkbGetMap(d.display, C.XkbAllClientInfoMask, C.XkbUseCoreKbd)
+	if keymap == nil {
+		return nil, state, keyboardUnavailable
+	}
+	return keymap, state, ""
 }
 
-func (d *x11Driver) TypeText(text string) {
-	keymap, state := d.keyboard()
-	if keymap == nil {
-		return
+func (d *x11Driver) TypeText(text string) keyboardIssue {
+	keymap, state, issue := d.keyboard()
+	if issue != "" {
+		return issue
 	}
 	defer C.XkbFreeKeyboard(keymap, C.XkbAllComponentsMask, C.True)
 
@@ -133,24 +137,29 @@ func (d *x11Driver) TypeText(text string) {
 				C.XTestFakeKeyEvent(d.display, C.uint(shift), C.True, C.CurrentTime)
 				d.tap(code)
 				C.XTestFakeKeyEvent(d.display, C.uint(shift), C.False, C.CurrentTime)
+				continue
 			}
 		}
+		issue = unsupportedLayout
 	}
 	C.XFlush(d.display)
+	return issue
 }
 
-func (d *x11Driver) TapKey(key keyboardKey) {
-	keymap, state := d.keyboard()
-	if keymap == nil {
-		return
+func (d *x11Driver) TapKey(key keyboardKey) keyboardIssue {
+	keymap, state, issue := d.keyboard()
+	if issue != "" {
+		return issue
 	}
 	defer C.XkbFreeKeyboard(keymap, C.XkbAllComponentsMask, C.True)
 
 	code := C.findKey(keymap, &state, C.uint(state.mods), x11Keys[key], 0)
-	if code != 0 {
-		d.tap(code)
-		C.XFlush(d.display)
+	if code == 0 {
+		return unsupportedLayout
 	}
+	d.tap(code)
+	C.XFlush(d.display)
+	return ""
 }
 
 func (d *x11Driver) tap(code C.KeyCode) {

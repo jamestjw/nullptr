@@ -32,14 +32,26 @@ class KeyboardInput(
 
     fun show() {
         isVisible = true
-        if (requestFocus()) ime.showSoftInput(this, InputMethodManager.SHOW_IMPLICIT)
+        if (requestFocus()) {
+            ime.restartInput(this)
+            ime.showSoftInput(this, InputMethodManager.SHOW_IMPLICIT)
+        }
     }
 
-    fun dismiss() {
+    fun dismiss(commit: Boolean) {
+        if (commit) session?.finishComposingText()
         session?.discard()
         ime.hideSoftInputFromWindow(windowToken, 0)
         clearFocus()
         isVisible = false
+    }
+
+    fun finishBeforePointerPress() {
+        val active = session ?: return
+        if (active.editable.isEmpty()) return
+        active.finishComposingText()
+        active.discard()
+        ime.restartInput(this)
     }
 
     fun tap(key: KeyboardKey) {

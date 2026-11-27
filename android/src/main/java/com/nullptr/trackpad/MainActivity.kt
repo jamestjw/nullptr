@@ -44,6 +44,8 @@ class MainActivity : ComponentActivity() {
     private lateinit var keyboardInput: KeyboardInput
     private lateinit var keyboardButton: Button
     private lateinit var specialKeys: HorizontalScrollView
+    private lateinit var keyboardNotice: TextView
+    private val expireKeyboardNotice = Runnable { keyboardNotice.isVisible = false }
     private lateinit var addressField: EditText
     private lateinit var codeField: EditText
     private lateinit var pairStatus: TextView
@@ -64,7 +66,7 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         WindowCompat.setDecorFitsSystemWindows(window, false)
-        connection = TrackpadConnection(::renderConnection)
+        connection = TrackpadConnection(::renderConnection, ::showKeyboardIssue)
         onBackPressedDispatcher.addCallback(this, settingsBack)
         val address = TailnetAddress.parse(prefs.getString("address", "").orEmpty())
         val token = prefs.getString("token", "").orEmpty()
@@ -121,7 +123,7 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun showPairing() {
-        if (screen == Screen.TRACKPAD) closeKeyboard()
+        if (screen == Screen.TRACKPAD) closeKeyboard(commit = false)
         screen = Screen.PAIRING
         connection.stop()
         buildRoot()
@@ -230,7 +232,10 @@ class MainActivity : ComponentActivity() {
         root.addView(header)
         status = label("", 14, muted).apply { accessibilityLiveRegion = View.ACCESSIBILITY_LIVE_REGION_POLITE }
         root.addView(status, spaced(top = 6))
-        pad = TouchpadView(this, connection::send)
+        pad = TouchpadView(this) { event ->
+            if (event is InputEvent.Button && event.down) keyboardInput.finishBeforePointerPress()
+            connection.send(event)
+        }
         pad.sensitivity = 0.4f + savedSensitivity() / 50f
         pad.invertScroll = prefs.getBoolean("invertScroll", false)
         root.addView(pad, LinearLayout.LayoutParams(-1, 0, 1f).apply { topMargin = dp(14) })
@@ -256,40 +261,57 @@ class MainActivity : ComponentActivity() {
         }
         var imeVisible = false
         keyboardButton = button("Keyboard") {
-            if (imeVisible && specialKeys.isVisible) {
-                closeKeyboard()
+            if (keyboardInput.isVisible) {
+                closeKeyboard(commit = true)
             } else {
                 specialKeys.isVisible = true
                 keyboardInput.show()
+                keyboardButton.text = "Hide"
             }
         }
         keyboardRow.addView(keyboardButton)
         keyboardRow.addView(specialKeys, LinearLayout.LayoutParams(0, -2, 1f))
         root.addView(keyboardRow, spaced(top = 8))
+        keyboardNotice = label("", 13, Color.rgb(255, 205, 142)).apply {
+            isVisible = false
+            accessibilityLiveRegion = View.ACCESSIBILITY_LIVE_REGION_POLITE
+        }
+        root.addView(keyboardNotice, spaced(top = 6))
         ViewCompat.setOnApplyWindowInsetsListener(keyboardRow) { _, insets ->
             val wasVisible = imeVisible
             imeVisible = insets.isVisible(WindowInsetsCompat.Type.ime())
-            if (wasVisible && !imeVisible) closeKeyboard()
+            if (wasVisible && !imeVisible) closeKeyboard(commit = true)
             header.isVisible = !imeVisible
             status.isVisible = !imeVisible
             gestureHelp.isVisible = !imeVisible
-            keyboardButton.text = if (imeVisible && specialKeys.isVisible) "Hide" else "Keyboard"
             insets
         }
         renderConnection(connection.status)
     }
 
-    private fun closeKeyboard() {
+    private fun closeKeyboard(commit: Boolean) {
         if (!keyboardInput.isVisible) return
-        keyboardInput.dismiss()
+        keyboardInput.dismiss(commit)
         specialKeys.isVisible = false
         keyboardButton.text = "Keyboard"
+    }
+
+    private fun showKeyboardIssue(issue: TrackpadConnection.KeyboardIssue) {
+        if (screen != Screen.TRACKPAD) return
+        keyboardNotice.text = when (issue) {
+            TrackpadConnection.KeyboardIssue.UNAVAILABLE -> "The desktop keyboard is unavailable."
+            TrackpadConnection.KeyboardIssue.MODIFIERS_ACTIVE -> "Input skipped. Release modifier keys on the desktop."
+            TrackpadConnection.KeyboardIssue.UNSUPPORTED_LAYOUT -> "Some input is not available in the desktop keyboard layout."
+        }
+        keyboardNotice.isVisible = true
+        keyboardNotice.removeCallbacks(expireKeyboardNotice)
+        keyboardNotice.postDelayed(expireKeyboardNotice, 5_000)
     }
 
     private fun showSettings() {
         if (screen == Screen.TRACKPAD) {
             pad.reset()
-            closeKeyboard()
+            closeKeyboard(commit = false)
         }
         screen = Screen.SETTINGS
         settingsBack.isEnabled = true
@@ -338,7 +360,11 @@ class MainActivity : ComponentActivity() {
         pad.isEnabled = ready
         pad.invalidate()
         val keyboardReady = ready && connection.supportsKeyboard
-        if (!keyboardReady) closeKeyboard()
+        if (!keyboardReady) {
+            closeKeyboard(commit = false)
+            keyboardNotice.removeCallbacks(expireKeyboardNotice)
+            expireKeyboardNotice.run()
+        }
         keyboardButton.isEnabled = keyboardReady
         val address = paired?.address
         status.text = when (state) {
@@ -353,6 +379,7 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun buildRoot() {
+        if (::keyboardNotice.isInitialized) keyboardNotice.removeCallbacks(expireKeyboardNotice)
         root = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             setBackgroundColor(backgroundColor)

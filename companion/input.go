@@ -38,12 +38,20 @@ func (key keyboardKey) valid() bool {
 	}
 }
 
+type keyboardIssue string
+
+const (
+	keyboardUnavailable keyboardIssue = "unavailable"
+	modifiersActive     keyboardIssue = "modifiersActive"
+	unsupportedLayout   keyboardIssue = "unsupportedLayout"
+)
+
 type inputDriver interface {
 	Move(dx, dy int)
 	Scroll(dx, dy int)
 	Button(button mouseButton, down bool)
-	TypeText(text string)
-	TapKey(key keyboardKey)
+	TypeText(text string) keyboardIssue
+	TapKey(key keyboardKey) keyboardIssue
 	Close()
 }
 
@@ -100,9 +108,23 @@ func (s *inputSession) run(driver inputDriver, idle time.Duration) {
 			return
 		}
 		var record inputRecord
-		if json.Unmarshal(data, &record) != nil || !record.apply(driver, held) {
+		if json.Unmarshal(data, &record) != nil {
 			s.close(websocket.ClosePolicyViolation, "invalid input record")
 			return
+		}
+		issue, valid := record.apply(driver, held)
+		if !valid {
+			s.close(websocket.ClosePolicyViolation, "invalid input record")
+			return
+		}
+		if issue != "" {
+			notice := struct {
+				Type   string        `json:"type"`
+				Reason keyboardIssue `json:"reason"`
+			}{Type: "keyboardIssue", Reason: issue}
+			if s.conn.SetWriteDeadline(time.Now().Add(writeTimeout)) != nil || s.conn.WriteJSON(notice) != nil {
+				return
+			}
 		}
 		if refreshDeadline() != nil {
 			return
@@ -131,21 +153,21 @@ func (s *inputSession) close(code int, reason string) {
 	s.conn.WriteControl(websocket.CloseMessage, message, time.Now().Add(writeTimeout))
 }
 
-func (r inputRecord) apply(driver inputDriver, held map[mouseButton]bool) bool {
+func (r inputRecord) apply(driver inputDriver, held map[mouseButton]bool) (keyboardIssue, bool) {
 	switch r.Type {
 	case "move":
 		if !r.deltasWithin(-32768, 32767) {
-			return false
+			return "", false
 		}
 		driver.Move(*r.DX, *r.DY)
 	case "scroll":
 		if !r.deltasWithin(-120, 120) {
-			return false
+			return "", false
 		}
 		driver.Scroll(*r.DX, *r.DY)
 	case "button":
 		if (r.Button != leftButton && r.Button != rightButton) || r.Down == nil {
-			return false
+			return "", false
 		}
 		if *r.Down != held[r.Button] {
 			driver.Button(r.Button, *r.Down)
@@ -157,23 +179,23 @@ func (r inputRecord) apply(driver inputDriver, held map[mouseButton]bool) bool {
 		}
 	case "text":
 		if r.Text == "" || utf8.RuneCountInString(r.Text) > 64 {
-			return false
+			return "", false
 		}
 		for _, char := range r.Text {
 			if unicode.IsControl(char) {
-				return false
+				return "", false
 			}
 		}
-		driver.TypeText(r.Text)
+		return driver.TypeText(r.Text), true
 	case "keyTap":
 		if !r.Key.valid() {
-			return false
+			return "", false
 		}
-		driver.TapKey(r.Key)
+		return driver.TapKey(r.Key), true
 	default:
-		return false
+		return "", false
 	}
-	return true
+	return "", true
 }
 
 func (r inputRecord) deltasWithin(minimum, maximum int) bool {

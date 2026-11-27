@@ -81,9 +81,18 @@ sealed interface InputEvent {
     }
 }
 
-class TrackpadConnection(private val onStatus: (Status) -> Unit) {
+class TrackpadConnection(
+    private val onStatus: (Status) -> Unit,
+    private val onKeyboardIssue: (KeyboardIssue) -> Unit,
+) {
     enum class Status {
         IDLE, CONNECTING, CONNECTED, RETRYING, UNPAIRED
+    }
+
+    enum class KeyboardIssue(val wireName: String) {
+        UNAVAILABLE("unavailable"),
+        MODIFIERS_ACTIVE("modifiersActive"),
+        UNSUPPORTED_LAYOUT("unsupportedLayout"),
     }
 
     private val main = Handler(Looper.getMainLooper())
@@ -206,6 +215,15 @@ class TrackpadConnection(private val onStatus: (Status) -> Unit) {
                     if (socket !== webSocket) return@post
                     retryDelay = 500
                     update(Status.CONNECTED, keyboard)
+                }
+            }
+
+            override fun onMessage(webSocket: WebSocket, text: String) {
+                val notice = runCatching { JSONObject(text) }.getOrNull() ?: return
+                if (notice.optString("type") != "keyboardIssue") return
+                val issue = KeyboardIssue.entries.find { it.wireName == notice.optString("reason") } ?: return
+                main.post {
+                    if (socket === webSocket && supportsKeyboard) onKeyboardIssue(issue)
                 }
             }
 

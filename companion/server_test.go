@@ -29,12 +29,14 @@ func (d testDriver) Button(button mouseButton, down bool) {
 	d <- fmt.Sprintf("%s %t", button, down)
 }
 
-func (d testDriver) TypeText(text string) {
+func (d testDriver) TypeText(text string) keyboardIssue {
 	d <- "text " + text
+	return ""
 }
 
-func (d testDriver) TapKey(key keyboardKey) {
+func (d testDriver) TapKey(key keyboardKey) keyboardIssue {
 	d <- "key " + string(key)
+	return ""
 }
 
 func (d testDriver) Close() {}
@@ -56,6 +58,12 @@ const testToken = "existing-token"
 func startTestServer(t *testing.T, pending *pairing, idle time.Duration, peer string) (*httptest.Server, *companion, testDriver) {
 	t.Helper()
 	driver := make(testDriver, 16)
+	server, c := startTestServerWithDriver(t, pending, idle, peer, driver)
+	return server, c, driver
+}
+
+func startTestServerWithDriver(t *testing.T, pending *pairing, idle time.Duration, peer string, driver inputDriver) (*httptest.Server, *companion) {
+	t.Helper()
 	c := &companion{
 		driver:    driver,
 		tokenFile: filepath.Join(t.TempDir(), "nullptr", "token"),
@@ -72,7 +80,7 @@ func startTestServer(t *testing.T, pending *pairing, idle time.Duration, peer st
 	}))
 	t.Cleanup(server.Close)
 	t.Cleanup(c.stop)
-	return server, c, driver
+	return server, c
 }
 
 func dialInput(t *testing.T, server *httptest.Server, header http.Header, want int) *websocket.Conn {
@@ -279,6 +287,36 @@ func TestInputMixesTypingAndPointerEvents(t *testing.T) {
 	driver.expect(t, "move 1 2")
 	driver.expect(t, "text Hello, déjà!")
 	driver.expect(t, "key enter")
+}
+
+type keyboardIssueDriver struct{ testDriver }
+
+func (d keyboardIssueDriver) TypeText(string) keyboardIssue { return modifiersActive }
+
+func (d keyboardIssueDriver) TapKey(keyboardKey) keyboardIssue { return unsupportedLayout }
+
+func TestInputReportsKeyboardIssuesWithoutDisconnecting(t *testing.T) {
+	driver := keyboardIssueDriver{make(testDriver, 16)}
+	server, _ := startTestServerWithDriver(t, nil, inputTimeout, "100.65.0.1:6123", driver)
+	conn := dialInput(t, server, bearer(testToken), http.StatusSwitchingProtocols)
+	for _, test := range []struct {
+		record string
+		reason string
+	}{
+		{`{"type":"text","text":"Hello"}`, "modifiersActive"},
+		{`{"type":"keyTap","key":"enter"}`, "unsupportedLayout"},
+	} {
+		sendRecord(t, conn, test.record)
+		var notice map[string]string
+		if err := conn.ReadJSON(&notice); err != nil {
+			t.Fatal(err)
+		}
+		if notice["type"] != "keyboardIssue" || notice["reason"] != test.reason {
+			t.Fatalf("keyboard issue = %v, want reason %s", notice, test.reason)
+		}
+	}
+	sendRecord(t, conn, `{"type":"move","dx":1,"dy":2}`)
+	driver.expect(t, "move 1 2")
 }
 
 func TestInputRejectsInvalidKeyboardEvents(t *testing.T) {
