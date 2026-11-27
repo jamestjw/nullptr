@@ -1,0 +1,35 @@
+{
+  "name": "nullptr-trackpad",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "android": "npm run prebuild:android && expo run:android --no-bundler",
+    "prebuild:android": "expo prebuild --platform android --no-install --clean --template expo-template-bare-minimum@57.0.36",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@react-native-async-storage/async-storage": "^2.2.0",
+    "@react-native-community/slider": "5.1.2",
+    "expo": "^57.0.34",
+    "expo-camera": "~57.0.6",
+    "expo-keep-awake": "~57.0.2",
+    "expo-secure-store": "~57.0.4",
+    "react": "19.2.3",
+    "react-native": "0.86.3",
+    "react-native-safe-area-context": "5.7.0",
+    "react-native-url-polyfill": "^4.0.0"
+  },
+  "devDependencies": {
+    "@babel/core": "^7.25.2",
+    "@babel/runtime": "^7.25.0",
+    "@react-native-community/cli": "20.1.0",
+    "@react-native-community/cli-platform-android": "20.1.0",
+    "@react-native/typescript-config": "0.86.3",
+    "@types/react": "^19.2.0",
+    "babel-preset-expo": "~57.0.17",
+    "typescript": "^5.8.3"
+  },
+  "engines": {
+    "node": "^22.13.0 || ^24.3.0 || >=25.0.0"
+  }
+}

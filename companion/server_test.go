@@ -146,7 +146,7 @@ func postPair(t *testing.T, server *httptest.Server, code string, want int) stri
 	return result.Token
 }
 
-func TestInputRequiresTailnetBearerAndNoOrigin(t *testing.T) {
+func TestInputRequiresTailnetBearerAndAllowedOrigin(t *testing.T) {
 	public, _, _ := startTestServer(t, nil, inputTimeout, "")
 	headers := bearer(testToken)
 	headers.Set("X-Forwarded-For", "100.65.0.1")
@@ -159,6 +159,52 @@ func TestInputRequiresTailnetBearerAndNoOrigin(t *testing.T) {
 	dialInput(t, server, headers, http.StatusForbidden)
 	dialInput(t, server, bearer(testToken), http.StatusSwitchingProtocols)
 	dialInput(t, server, bearer(testToken), http.StatusConflict)
+}
+
+func TestNativeClientChecksCredentialAndConnects(t *testing.T) {
+	server, _, driver := startTestServer(t, nil, inputTimeout, "100.65.0.1:6123")
+	for _, check := range []struct {
+		token  string
+		origin string
+		want   int
+	}{
+		{testToken, "", http.StatusNoContent},
+		{"replaced", "", http.StatusUnauthorized},
+		{testToken, nativeOrigin, http.StatusForbidden},
+	} {
+		req, err := http.NewRequest(http.MethodGet, server.URL+"/v1/status", nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		req.Header = bearer(check.token)
+		if check.origin != "" {
+			req.Header.Set("Origin", check.origin)
+		}
+		res, err := server.Client().Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		res.Body.Close()
+		if res.StatusCode != check.want {
+			t.Fatalf("status = %d, want %d", res.StatusCode, check.want)
+		}
+		if advertised := res.Header.Get(keyboardHeader) == "1"; advertised != (check.want == http.StatusNoContent) {
+			t.Fatalf("keyboard support advertised with status %d: %t", res.StatusCode, advertised)
+		}
+	}
+	headers := bearer(testToken)
+	headers.Set("Origin", "https://example.com")
+	dialInput(t, server, headers, http.StatusForbidden)
+	headers.Set("Origin", nativeOrigin)
+	headers.Set("Authorization", "Bearer invalid")
+	dialInput(t, server, headers, http.StatusUnauthorized)
+	headers.Set("Authorization", "Bearer "+testToken)
+	headers.Add("Origin", "https://example.com")
+	dialInput(t, server, headers, http.StatusForbidden)
+	headers.Set("Origin", nativeOrigin)
+	conn := dialInput(t, server, headers, http.StatusSwitchingProtocols)
+	sendRecord(t, conn, `{"type":"move","dx":2,"dy":-1}`)
+	driver.expect(t, "move 2 -1")
 }
 
 func TestPairRefusesWhileInputActive(t *testing.T) {

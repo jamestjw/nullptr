@@ -1,0 +1,41 @@
+{
+  "expo": {
+    "name": "nullptr RN trackpad",
+    "slug": "nullptr-trackpad",
+    "version": "0.1.0",
+    "icon": "./assets/trackpad.png",
+    "android": {
+      "package": "com.nullptr.trackpad.reactnative",
+      "allowBackup": false,
+      "blockedPermissions": [
+        "android.permission.READ_EXTERNAL_STORAGE",
+        "android.permission.RECORD_AUDIO",
+        "android.permission.SYSTEM_ALERT_WINDOW",
+        "android.permission.WRITE_EXTERNAL_STORAGE"
+      ]
+    },
+    "ios": {
+      "bundleIdentifier": "com.nullptr.trackpad.reactnative",
+      "infoPlist": {
+        "NSLocalNetworkUsageDescription": "Connect to your paired computer over Tailscale.",
+        "NSAppTransportSecurity": {
+          "NSAllowsLocalNetworking": true,
+          "NSExceptionDomains": {
+            "100.64.0.0/10": {
+              "NSExceptionAllowsInsecureHTTPLoads": true
+            }
+          }
+        }
+      }
+    },
+    "plugins": [
+      ["expo-camera", {
+        "cameraPermission": "Scan the pairing QR code shown on your computer.",
+        "microphonePermission": false,
+        "recordAudioAndroid": false
+      }],
+      ["expo-secure-store", { "faceIDPermission": false, "configureAndroidBackup": false }],
+      "./plugins/withAndroidBuild"
+    ]
+  }
+}
