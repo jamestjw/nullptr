@@ -48,6 +48,8 @@ For a fresh pairing, stop the service and run `~/.local/bin/nullptr-companion --
 
 Check the service with `systemctl --user status nullptr-companion.service`. Read errors with `journalctl --user -u nullptr-companion.service`.
 
+To stop the service and remove the installed companion and its login entry, run `./uninstall-companion.sh`. The script keeps your pairing credential so you can reconnect after reinstalling.
+
 ## Publish a release
 
 GitHub Actions builds both apps for pushes to `main` and pull requests. Download the debug APK and Linux companion from the workflow run's **Artifacts** section. Use the release APK for regular updates. CI debug APKs can use a different signing key on each run.
