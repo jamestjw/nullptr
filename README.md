@@ -7,6 +7,10 @@
 
 Keep the companion running while you use the trackpad. Tap to click. Hold and slide to drag. Slide two fingers to scroll, or tap with two fingers to right-click. Open **Settings** to adjust pointer sensitivity or reverse scrolling.
 
+Tap **Keyboard** to type into the focused desktop window. If your phone keyboard shows a word in its suggestion bar, press Space or pick the suggestion to send it. Swipe the row above the keyboard for Backspace, Enter, Tab, Escape, and the arrow keys.
+
+The companion uses the active X11 layout. It sends characters you can type with an unmodified key or Shift. If **Keyboard** is disabled while the trackpad is connected, update the companion.
+
 The companion listens on TCP port `47822` at its Tailscale IPv4 address. Tailscale encrypts the connection. If the phone cannot connect, check that your tailnet policy and Fedora firewall allow the phone to reach that port. To show a new pairing code for a companion you start by hand, restart it with `--pair`.
 
 ## Build both apps
@@ -17,7 +21,7 @@ Use JDK 17 or 21. Set `ANDROID_HOME` to an Android SDK with platform 35 and buil
 ./gradlew :android:assembleDebug
 ```
 
-On Fedora, install Go 1.25 or later, GCC, pkg-config, `libX11-devel`, and `libXtst-devel`. From the project root, run:
+On Fedora, install Go 1.25 or later, GCC, pkg-config, `libX11-devel`, `libXtst-devel`, and `libxkbcommon-devel`. From the project root, run:
 
 ```sh
 mkdir -p companion/build

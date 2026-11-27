@@ -2,6 +2,7 @@ package com.nullptr.trackpad
 
 import android.os.Handler
 import android.os.Looper
+import android.view.KeyEvent
 import okhttp3.Call
 import okhttp3.Callback
 import okhttp3.MediaType.Companion.toMediaType
@@ -42,6 +43,17 @@ enum class MouseButton(val wireName: String) {
     RIGHT("right")
 }
 
+enum class KeyboardKey(val wireName: String, val label: String, val keyCode: Int) {
+    BACKSPACE("backspace", "⌫", KeyEvent.KEYCODE_DEL),
+    ENTER("enter", "Enter", KeyEvent.KEYCODE_ENTER),
+    TAB("tab", "Tab", KeyEvent.KEYCODE_TAB),
+    ESCAPE("escape", "Esc", KeyEvent.KEYCODE_ESCAPE),
+    LEFT("left", "←", KeyEvent.KEYCODE_DPAD_LEFT),
+    RIGHT("right", "→", KeyEvent.KEYCODE_DPAD_RIGHT),
+    UP("up", "↑", KeyEvent.KEYCODE_DPAD_UP),
+    DOWN("down", "↓", KeyEvent.KEYCODE_DPAD_DOWN),
+}
+
 sealed interface InputEvent {
     fun toJson(): JSONObject
 
@@ -56,6 +68,16 @@ sealed interface InputEvent {
     data class Button(val button: MouseButton, val down: Boolean) : InputEvent {
         override fun toJson() =
             JSONObject().put("type", "button").put("button", button.wireName).put("down", down)
+    }
+
+    sealed interface Keyboard : InputEvent
+
+    data class Text(val text: String) : Keyboard {
+        override fun toJson() = JSONObject().put("type", "text").put("text", text)
+    }
+
+    data class KeyTap(val key: KeyboardKey) : Keyboard {
+        override fun toJson() = JSONObject().put("type", "keyTap").put("key", key.wireName)
     }
 }
 
@@ -77,6 +99,8 @@ class TrackpadConnection(private val onStatus: (Status) -> Unit) {
     private var socket: WebSocket? = null
     private var pairing: Call? = null
     var status = Status.IDLE
+        private set
+    var supportsKeyboard = false
         private set
     private var retryDelay = 500L
     private val retry = Runnable { open() }
@@ -145,11 +169,20 @@ class TrackpadConnection(private val onStatus: (Status) -> Unit) {
     }
 
     fun send(event: InputEvent) {
-        val active = socket ?: return
-        if (status != Status.CONNECTED) return
+        enqueue(event)
+    }
+
+    fun sendKeyboard(event: InputEvent.Keyboard): Boolean = enqueue(event)
+
+    private fun enqueue(event: InputEvent): Boolean {
+        val active = socket ?: return false
+        if (status != Status.CONNECTED) return false
+        if (event is InputEvent.Keyboard && !supportsKeyboard) return false
         if (active.queueSize() > 4096 || !active.send(event.toJson().toString())) {
             main.post { disconnected(active) }
+            return false
         }
+        return true
     }
 
     fun dispose() {
@@ -168,10 +201,11 @@ class TrackpadConnection(private val onStatus: (Status) -> Unit) {
             .build()
         socket = http.newWebSocket(request, object : WebSocketListener() {
             override fun onOpen(webSocket: WebSocket, response: Response) {
+                val keyboard = response.header("X-Nullptr-Keyboard") == "1"
                 main.post {
                     if (socket !== webSocket) return@post
                     retryDelay = 500
-                    update(Status.CONNECTED)
+                    update(Status.CONNECTED, keyboard)
                 }
             }
 
@@ -206,8 +240,9 @@ class TrackpadConnection(private val onStatus: (Status) -> Unit) {
         retryDelay = (retryDelay * 2).coerceAtMost(5_000)
     }
 
-    private fun update(next: Status) {
+    private fun update(next: Status, keyboard: Boolean = false) {
         status = next
+        supportsKeyboard = keyboard
         onStatus(next)
     }
 }

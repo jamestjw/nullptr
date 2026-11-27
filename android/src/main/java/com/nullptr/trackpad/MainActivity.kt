@@ -14,6 +14,7 @@ import android.view.WindowManager
 import android.view.inputmethod.InputMethodManager
 import android.widget.Button
 import android.widget.EditText
+import android.widget.HorizontalScrollView
 import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.SeekBar
@@ -24,6 +25,7 @@ import androidx.activity.OnBackPressedCallback
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
+import androidx.core.view.isVisible
 import com.journeyapps.barcodescanner.ScanContract
 import com.journeyapps.barcodescanner.ScanOptions
 
@@ -39,6 +41,9 @@ class MainActivity : ComponentActivity() {
     private lateinit var root: LinearLayout
     private lateinit var pad: TouchpadView
     private lateinit var status: TextView
+    private lateinit var keyboardInput: KeyboardInput
+    private lateinit var keyboardButton: Button
+    private lateinit var specialKeys: HorizontalScrollView
     private lateinit var addressField: EditText
     private lateinit var codeField: EditText
     private lateinit var pairStatus: TextView
@@ -116,6 +121,7 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun showPairing() {
+        if (screen == Screen.TRACKPAD) closeKeyboard()
         screen = Screen.PAIRING
         connection.stop()
         buildRoot()
@@ -228,12 +234,63 @@ class MainActivity : ComponentActivity() {
         pad.sensitivity = 0.4f + savedSensitivity() / 50f
         pad.invertScroll = prefs.getBoolean("invertScroll", false)
         root.addView(pad, LinearLayout.LayoutParams(-1, 0, 1f).apply { topMargin = dp(14) })
-        root.addView(label("Tap to click · Hold to drag · Two fingers to scroll or right-click", 13, muted), spaced(top = 10))
+        val gestureHelp = label("Tap to click · Hold to drag · Two fingers to scroll or right-click", 13, muted)
+        root.addView(gestureHelp, spaced(top = 10))
+        keyboardInput = KeyboardInput(this, connection::sendKeyboard).apply { isVisible = false }
+        root.addView(keyboardInput, LinearLayout.LayoutParams(1, 1))
+        val keyboardRow = LinearLayout(this).apply { gravity = Gravity.CENTER_VERTICAL }
+        specialKeys = HorizontalScrollView(this).apply {
+            isVisible = false
+            isScrollbarFadingEnabled = false
+            contentDescription = "Special keys. Scroll for more."
+            addView(LinearLayout(this@MainActivity).apply {
+                KeyboardKey.entries.forEach { key ->
+                    addView(button(key.label) { keyboardInput.tap(key) }.apply {
+                        contentDescription = key.wireName.replaceFirstChar { it.uppercase() }
+                        minWidth = dp(48)
+                        minimumWidth = dp(48)
+                        setPadding(dp(10), 0, dp(10), 0)
+                    }, LinearLayout.LayoutParams(-2, -2).apply { marginStart = dp(6) })
+                }
+            })
+        }
+        var imeVisible = false
+        keyboardButton = button("Keyboard") {
+            if (imeVisible && specialKeys.isVisible) {
+                closeKeyboard()
+            } else {
+                specialKeys.isVisible = true
+                keyboardInput.show()
+            }
+        }
+        keyboardRow.addView(keyboardButton)
+        keyboardRow.addView(specialKeys, LinearLayout.LayoutParams(0, -2, 1f))
+        root.addView(keyboardRow, spaced(top = 8))
+        ViewCompat.setOnApplyWindowInsetsListener(keyboardRow) { _, insets ->
+            val wasVisible = imeVisible
+            imeVisible = insets.isVisible(WindowInsetsCompat.Type.ime())
+            if (wasVisible && !imeVisible) closeKeyboard()
+            header.isVisible = !imeVisible
+            status.isVisible = !imeVisible
+            gestureHelp.isVisible = !imeVisible
+            keyboardButton.text = if (imeVisible && specialKeys.isVisible) "Hide" else "Keyboard"
+            insets
+        }
         renderConnection(connection.status)
     }
 
+    private fun closeKeyboard() {
+        if (!keyboardInput.isVisible) return
+        keyboardInput.dismiss()
+        specialKeys.isVisible = false
+        keyboardButton.text = "Keyboard"
+    }
+
     private fun showSettings() {
-        if (::pad.isInitialized) pad.reset()
+        if (screen == Screen.TRACKPAD) {
+            pad.reset()
+            closeKeyboard()
+        }
         screen = Screen.SETTINGS
         settingsBack.isEnabled = true
         buildRoot()
@@ -280,11 +337,15 @@ class MainActivity : ComponentActivity() {
         if (pad.isEnabled && !ready) pad.reset()
         pad.isEnabled = ready
         pad.invalidate()
+        val keyboardReady = ready && connection.supportsKeyboard
+        if (!keyboardReady) closeKeyboard()
+        keyboardButton.isEnabled = keyboardReady
         val address = paired?.address
         status.text = when (state) {
             TrackpadConnection.Status.IDLE -> address?.let { "Saved computer · $it" } ?: "No computer paired"
             TrackpadConnection.Status.CONNECTING -> "Connecting to $address…"
-            TrackpadConnection.Status.CONNECTED -> "Connected · $address"
+            TrackpadConnection.Status.CONNECTED -> if (keyboardReady) "Connected · $address"
+                else "Connected · $address\nUpdate the companion to use Keyboard."
             TrackpadConnection.Status.RETRYING -> "Connection lost. Retrying…"
             TrackpadConnection.Status.UNPAIRED -> "Pairing expired or was replaced. Pair again."
         }

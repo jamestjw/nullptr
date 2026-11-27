@@ -26,7 +26,7 @@ const (
 var tailnet = netip.MustParsePrefix("100.64.0.0/10")
 
 type companion struct {
-	driver    pointerDriver
+	driver    inputDriver
 	tokenFile string
 	idle      time.Duration
 
@@ -143,7 +143,7 @@ func (c *companion) upgrade(w http.ResponseWriter, r *http.Request) *inputSessio
 		return nil
 	}
 	upgrader := websocket.Upgrader{HandshakeTimeout: writeTimeout}
-	conn, err := upgrader.Upgrade(w, r, nil)
+	conn, err := upgrader.Upgrade(w, r, http.Header{"X-Nullptr-Keyboard": {"1"}})
 	if err != nil {
 		return nil
 	}

@@ -29,6 +29,14 @@ func (d testDriver) Button(button mouseButton, down bool) {
 	d <- fmt.Sprintf("%s %t", button, down)
 }
 
+func (d testDriver) TypeText(text string) {
+	d <- "text " + text
+}
+
+func (d testDriver) TapKey(key keyboardKey) {
+	d <- "key " + string(key)
+}
+
 func (d testDriver) Close() {}
 
 func (d testDriver) expect(t *testing.T, want string) {
@@ -36,10 +44,10 @@ func (d testDriver) expect(t *testing.T, want string) {
 	select {
 	case got := <-d:
 		if got != want {
-			t.Fatalf("pointer event = %q, want %q", got, want)
+			t.Fatalf("input event = %q, want %q", got, want)
 		}
 	case <-time.After(3 * time.Second):
-		t.Fatalf("did not receive pointer event %q", want)
+		t.Fatalf("did not receive input event %q", want)
 	}
 }
 
@@ -80,6 +88,9 @@ func dialInput(t *testing.T, server *httptest.Server, header http.Header, want i
 	}
 	if err != nil {
 		t.Fatal(err)
+	}
+	if got := response.Header.Get("X-Nullptr-Keyboard"); got != "1" {
+		t.Fatalf("keyboard capability = %q, want 1", got)
 	}
 	if err := conn.SetReadDeadline(time.Now().Add(3 * time.Second)); err != nil {
 		t.Fatal(err)
@@ -256,5 +267,35 @@ func TestInputAnswersProtocolPing(t *testing.T) {
 		}
 	case <-time.After(time.Second):
 		t.Fatal("no pong")
+	}
+}
+
+func TestInputMixesTypingAndPointerEvents(t *testing.T) {
+	server, _, driver := startTestServer(t, nil, inputTimeout, "100.65.0.1:6123")
+	conn := dialInput(t, server, bearer(testToken), http.StatusSwitchingProtocols)
+	sendRecord(t, conn, `{"type":"move","dx":1,"dy":2}`)
+	sendRecord(t, conn, `{"type":"text","text":"Hello, déjà!"}`)
+	sendRecord(t, conn, `{"type":"keyTap","key":"enter"}`)
+	driver.expect(t, "move 1 2")
+	driver.expect(t, "text Hello, déjà!")
+	driver.expect(t, "key enter")
+}
+
+func TestInputRejectsInvalidKeyboardEvents(t *testing.T) {
+	for _, record := range []string{
+		`{"type":"text","text":""}`,
+		`{"type":"text","text":"bad\ninput"}`,
+		fmt.Sprintf(`{"type":"text","text":%q}`, strings.Repeat("é", 65)),
+		`{"type":"keyTap","key":"F1"}`,
+	} {
+		t.Run(record, func(t *testing.T) {
+			server, _, _ := startTestServer(t, nil, inputTimeout, "100.65.0.1:6123")
+			conn := dialInput(t, server, bearer(testToken), http.StatusSwitchingProtocols)
+			sendRecord(t, conn, record)
+			_, _, err := conn.ReadMessage()
+			if !websocket.IsCloseError(err, websocket.ClosePolicyViolation) {
+				t.Fatalf("invalid keyboard record close: %v", err)
+			}
+		})
 	}
 }

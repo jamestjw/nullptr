@@ -4,6 +4,6 @@ package main
 
 import "errors"
 
-func openDriver() (pointerDriver, error) {
+func openDriver() (inputDriver, error) {
 	return nil, errors.New("the pointer driver requires Linux with CGO and X11/XTest development libraries")
 }

@@ -3,6 +3,8 @@ package main
 import (
 	"encoding/json"
 	"time"
+	"unicode"
+	"unicode/utf8"
 
 	"github.com/gorilla/websocket"
 )
@@ -14,10 +16,34 @@ const (
 	rightButton mouseButton = "right"
 )
 
-type pointerDriver interface {
+type keyboardKey string
+
+const (
+	backspaceKey keyboardKey = "backspace"
+	enterKey     keyboardKey = "enter"
+	tabKey       keyboardKey = "tab"
+	escapeKey    keyboardKey = "escape"
+	leftKey      keyboardKey = "left"
+	rightKey     keyboardKey = "right"
+	upKey        keyboardKey = "up"
+	downKey      keyboardKey = "down"
+)
+
+func (key keyboardKey) valid() bool {
+	switch key {
+	case backspaceKey, enterKey, tabKey, escapeKey, leftKey, rightKey, upKey, downKey:
+		return true
+	default:
+		return false
+	}
+}
+
+type inputDriver interface {
 	Move(dx, dy int)
 	Scroll(dx, dy int)
 	Button(button mouseButton, down bool)
+	TypeText(text string)
+	TapKey(key keyboardKey)
 	Close()
 }
 
@@ -27,6 +53,8 @@ type inputRecord struct {
 	DY     *int        `json:"dy"`
 	Button mouseButton `json:"button"`
 	Down   *bool       `json:"down"`
+	Text   string      `json:"text"`
+	Key    keyboardKey `json:"key"`
 }
 
 type inputSession struct {
@@ -34,7 +62,7 @@ type inputSession struct {
 	done chan struct{}
 }
 
-func (s *inputSession) run(driver pointerDriver, idle time.Duration) {
+func (s *inputSession) run(driver inputDriver, idle time.Duration) {
 	held := make(map[mouseButton]bool)
 	defer func() {
 		for button := range held {
@@ -103,7 +131,7 @@ func (s *inputSession) close(code int, reason string) {
 	s.conn.WriteControl(websocket.CloseMessage, message, time.Now().Add(writeTimeout))
 }
 
-func (r inputRecord) apply(driver pointerDriver, held map[mouseButton]bool) bool {
+func (r inputRecord) apply(driver inputDriver, held map[mouseButton]bool) bool {
 	switch r.Type {
 	case "move":
 		if !r.deltasWithin(-32768, 32767) {
@@ -127,6 +155,21 @@ func (r inputRecord) apply(driver pointerDriver, held map[mouseButton]bool) bool
 				delete(held, r.Button)
 			}
 		}
+	case "text":
+		if r.Text == "" || utf8.RuneCountInString(r.Text) > 64 {
+			return false
+		}
+		for _, char := range r.Text {
+			if unicode.IsControl(char) {
+				return false
+			}
+		}
+		driver.TypeText(r.Text)
+	case "keyTap":
+		if !r.Key.valid() {
+			return false
+		}
+		driver.TapKey(r.Key)
 	default:
 		return false
 	}
